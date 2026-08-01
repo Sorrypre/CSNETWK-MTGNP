@@ -2,6 +2,18 @@ import sys
 import threading
 import socket
 from schemas import *
+import logging
+import os
+import sys
+
+# Track two levels up from client.py to find the project root
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, ROOT)
+
+from shared.util.logger_util import setup_app_logging
+
+setup_app_logging(__file__)
+
 
 def receive(conn, addr):
     try:
@@ -25,7 +37,7 @@ def receive(conn, addr):
 
 PORT = 4444
 listening = False
-server_socket = socket(AF_INET, SOCK_STREAM)
+server_socket = socket(socket.AF_INET, socket.SOCK_STREAM)
 server_socket.bind(('', PORT))
 
 try:
