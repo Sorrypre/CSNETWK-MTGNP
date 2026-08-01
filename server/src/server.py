@@ -14,13 +14,14 @@ def receive(conn, addr):
         else:
             valid = True
         if not valid:
-            conn.close()
             return
         # parse the schema from here, i.e. json string to PDU object
         # ....
         # then execute the appropriate action depending on the schema
         # create a def for that action as needed
         # ....
+    finally:
+        conn.close()
 
 PORT = 4444
 listening = False
