@@ -5,6 +5,17 @@ import json
 from schemas import *
 from pydantic import ValidationError
 from framer import read_framed_message, send_framed_message
+import logging
+import os
+import sys
+
+# Track two levels up from client.py to find the project root
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, ROOT)
+
+from shared.util.logger_util import setup_app_logging
+
+setup_app_logging(__file__)
 
 PORT = 4444
 MAX_CLIENTS = 2
