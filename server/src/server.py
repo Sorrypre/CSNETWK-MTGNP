@@ -7,7 +7,6 @@ from pydantic import ValidationError
 from framer import read_framed_message, send_framed_message
 import logging
 import os
-import sys
 
 # Track two levels up from client.py to find the project root
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
