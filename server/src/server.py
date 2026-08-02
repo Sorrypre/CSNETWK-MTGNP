@@ -2,11 +2,22 @@ import sys
 import threading
 import socket
 import json
+from schemas import *
 from pydantic import ValidationError
 from schemas import Error, Ping, Pong
 from framer import read_framed_message, send_framed_message
 from game_state import GameState
 from lobby import handle_player_ready, handle_mulligan_choice
+import logging
+import os
+
+# Track two levels up from client.py to find the project root
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, ROOT)
+
+from shared.util.logger_util import setup_app_logging
+
+setup_app_logging(__file__)
 
 PORT = 4444
 MAX_CLIENTS = 2
@@ -17,7 +28,12 @@ connections_lock = threading.Lock()
 game_state = GameState()
 
 def send_error(conn, seq_num, code, message, rejected_action=None):
-    """Utility helper to send structured Error PDUs back to the client."""
+    """
+    Sends standardized Pydantic Error PDU/messages matching schema.
+    Also, takes the json input, and passes it send_framed_message to add the 
+    4-byte header before transimission. Utility helper to send structured 
+    Error PDUs back to the client.
+    """
     err_pdu = Error(
         type="ERROR",
         seq_num=seq_num,
@@ -28,6 +44,10 @@ def send_error(conn, seq_num, code, message, rejected_action=None):
     send_framed_message(conn, err_pdu.model_dump_json().encode('utf-8'))
 
 def receive(conn, addr):
+    """
+    Receives payload to inspect the big-endian prefix.
+    If payload is >65535, catches ValueError and closes thread
+    """
     print(f'Client connected from {addr}')
     try:
         while True:
@@ -60,16 +80,10 @@ def receive(conn, addr):
                     send_error(conn, seq_num=seq_num, code="MALFORMED_PING", message=str(ve))
                 continue
 
-            elif msg_type == "PLAYER_READY":
-                handle_player_ready(conn, message, game_state)
+            # Parse other schema types here for Phase 2+
+            # ....
 
-            elif msg_type == "MULLIGAN_CHOICE":
-                handle_mulligan_choice(conn, message, game_state)
-
-            else:
-                # Unhandled or invalid message types
-                print(f'Received from {addr}: {message}')
-
+            print(f'Received from {addr}: {message}')
     finally:
         with connections_lock:
             if conn in active_connections:
@@ -83,9 +97,12 @@ def receive(conn, addr):
                 print(f"[LOBBY] Player '{p_id}' removed due to disconnection.")
 
         conn.close()
+        with connections_lock:
+            if conn in active_connections:
+                active_connections.remove(conn)
+        conn.close()
         print(f'Connection closed for {addr}')
 
-PORT = 4444
 listening = False
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -101,7 +118,7 @@ try:
     server_socket.listen()
     while listening:
         conn, addr = server_socket.accept()
-        
+
         with connections_lock:
             if len(active_connections) >= MAX_CLIENTS:
                 print(f'Rejected extra connection from {addr}')
@@ -110,8 +127,7 @@ try:
                 continue
 
             active_connections.append(conn)
-
-        thread = threading.Thread(target=receive, args=(conn, addr))
+        thread = threading.Thread(target = receive, args = (conn, addr))
         thread.start()
 except KeyboardInterrupt:
     print('Server stopped via Ctrl+C')
