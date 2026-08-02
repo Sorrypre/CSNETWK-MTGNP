@@ -1,6 +1,7 @@
 from pydantic import ValidationError
 from schemas import PlayerReady, MulliganChoice, GameStateUpdate, Error
 from framer import send_framed_message
+from game_state import PlayerState
 
 def send_error_response(conn, seq_num: int, code: str, message: str, rejected_action=None):
     err_pdu = Error(
@@ -13,10 +14,16 @@ def send_error_response(conn, seq_num: int, code: str, message: str, rejected_ac
     send_framed_message(conn, err_pdu.model_dump_json().encode('utf-8'))
 
 def broadcast_game_state(game_state):
-    """Utility to broadcast GAME_STATE_UPDATE to all registered player connections."""
+    """
+    Utility to broadcast GAME_STATE_UPDATE to all registered 
+    player connections when a game state changes.
+    """
     pdu = GameStateUpdate(
         type="GAME_STATE_UPDATE",
         seq_num=game_state.get_next_seq_num(),
+        # if LOBBY, use default states
+        # if MULLIGAN or IN_GAME, use p_id dict, containing
+        # game summary of players
         state=game_state.get_lobby_state_dict() if game_state.phase == "LOBBY" else {
             "phase": game_state.phase,
             "active_player": game_state.active_player,
@@ -31,13 +38,17 @@ def broadcast_game_state(game_state):
         }
     )
     payload = pdu.model_dump_json().encode('utf-8')
+    # Sends to all clients (all sockets)
     for conn in game_state.player_sockets.values():
         send_framed_message(conn, payload)
 
 def handle_player_ready(conn, payload: dict, game_state) -> bool:
-    """Validates registration and deck limits. Returns True if game setup is triggered."""
+    """
+    Validates registration and deck limits. 
+    Returns True if game setup is triggered.
+    """
     try:
-        pdu = PlayerReady(**payload)
+        pdu = PlayerReady(**payload) # auto checks deck length
     except ValidationError as ve:
         send_error_response(conn, payload.get("seq_num", 0), "INVALID_PDU", str(ve), rejected_action=payload)
         return False
@@ -48,7 +59,6 @@ def handle_player_ready(conn, payload: dict, game_state) -> bool:
         return False
 
     # Register player and socket
-    from game_state import PlayerState
     new_player = PlayerState(pdu.player_id, pdu.deck_list)
     game_state.players[pdu.player_id] = new_player
     game_state.socket_to_player[conn] = pdu.player_id
