@@ -21,13 +21,13 @@ MAX_CLIENTS = 2
 active_connections = []
 connections_lock = threading.Lock()
 
-"""
-Sends standardized Pydantic Error PDU/messages matching schema.
-Also, takes the json input, and passes it send_framed_message to add the 
-4-byte header before transimission. Utility helper to send structured 
-Error PDUs back to the client.
-"""
 def send_error(conn, seq_num, code, message, rejected_action=None):
+    """
+    Sends standardized Pydantic Error PDU/messages matching schema.
+    Also, takes the json input, and passes it send_framed_message to add the 
+    4-byte header before transimission. Utility helper to send structured 
+    Error PDUs back to the client.
+    """
     err_pdu = Error(
         type="ERROR",
         seq_num=seq_num,
@@ -37,11 +37,11 @@ def send_error(conn, seq_num, code, message, rejected_action=None):
     )
     send_framed_message(conn, err_pdu.model_dump_json().encode('utf-8'))
 
-"""
-Receives payload to inspect the big-endian prefix.
-If payload is >65535, catches ValueError and closes thread
-"""
 def receive(conn, addr):
+    """
+    Receives payload to inspect the big-endian prefix.
+    If payload is >65535, catches ValueError and closes thread
+    """
     print(f'Client connected from {addr}')
     try:
         while True:
