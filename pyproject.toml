@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools >= 77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "CSNETWK-MTGNP"
+version = "0.0.1"
+authors = [
+  { name="Joramm Dela Torre", email="joramm_delatorre@dlsu.edu.ph" },
+  { name="Jensel Espada", email="jensel_john_l_espada@dlsu.edu.ph" },
+  { name="Kurt Laguerta", email="kurt_laguerta@dlsu.edu.ph" },
+  { name="Kei Saguin", email="vl_saguin@dlsu.edu.ph" },
+]
+description = "This machine problem requires you to implement a networked two-player card game system following the Magic: The Gathering Multiplayer Network Protocol (MTGNP) v1.0, as defined in RFC 0001 (CSNETWK)."
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+  "pydantic>=2.0.0",
+]
+
+[tool.setuptools]
+py-modules = ["client", "server", "shared"]
+
+[project.urls]
+Homepage = "https://github.comhttps://github.com/Sorrypre/CSNETWK-MTGNP"
+Issues = "https://github.com/Sorrypre/CSNETWK-MTGNP/issues"
