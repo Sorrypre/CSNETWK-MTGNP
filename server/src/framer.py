@@ -4,9 +4,6 @@ import socket
 HEADER_SIZE = 4
 MAX_PAYLOAD_SIZE = 65535
 
-"""
-Takes raw JSON bytes and prepends length header before sending
-"""
 def send_framed_message(sock: socket.socket, payload_bytes: bytes):
     """
     Packs the length of the payload as a 4-byte big-endian integer and 
@@ -16,12 +13,10 @@ def send_framed_message(sock: socket.socket, payload_bytes: bytes):
     header = struct.pack("!I", length) # packs the header into big endian !I
     sock.sendall(header + payload_bytes) # then sends it off
 
-"""
-Collects all requested bytes properly
-"""
 def recv_exact(sock: socket.socket, num_bytes: int) -> bytes:
     """
-    Reads exactly num_bytes from a TCP stream.
+    Collects all requested bytes properly by reading 
+    exactly num_bytes from a TCP stream.
     """
     buffer = bytearray()
     while len(buffer) < num_bytes:
@@ -35,14 +30,14 @@ def recv_exact(sock: socket.socket, num_bytes: int) -> bytes:
         buffer.extend(packet)
     return bytes(buffer)
 
-"""
-Executes the payload framing process.
-Reads the 4-byte big-endian integer to determine length, validates bounds, and 
-retrieves the exact JSON payload.
-
-Returns payload bytes on success, or raises ValueError/ConnectionError on failure.    
-"""
 def read_framed_message(sock: socket.socket) -> bytes:
+    """
+    Executes the payload framing process.
+    Reads the 4-byte big-endian integer to determine length, validates bounds, and 
+    retrieves the exact JSON payload.
+
+    Returns payload bytes on success, or raises ValueError/ConnectionError on failure.    
+    """
     header_bytes = recv_exact(sock, HEADER_SIZE)
     if not header_bytes:
         raise ConnectionError("Client disconnected while reading header")
