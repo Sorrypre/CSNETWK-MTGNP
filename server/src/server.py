@@ -1,8 +1,8 @@
 import sys
+import os
 import threading
 import socket
 import json
-from schemas import *
 from pydantic import ValidationError
 from schemas import Error, Ping, Pong, PDUType
 from framer import read_framed_message, send_framed_message
@@ -10,7 +10,6 @@ from game_state import GameState
 from game_engine import GameEngine
 from lobby import *
 import logging
-import os
 
 # Track two levels up from client.py to find the project root
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -147,6 +146,28 @@ def receive(conn, addr):
                         elif pdu.type == PDUType.PRIORITY_GRANT:
                             active_conn = game_state.player_sockets.get(pdu.player_id)
                             send_framed_message(active_conn, payload_bytes)
+
+                case PDUType.PLAY_LAND:
+                    if game_state.phase != "IN_GAME":
+                        send_error_response(conn, seq_num, "WRONG_PHASE", "The players are not ingame.")
+                        continue
+                    try:
+                        land_pdu = PlayLand(**message)
+                    except ValidationError as ve:
+                        send_error_response(conn, seq_num, "INVALID_PDU", str(ve))
+                        continue
+                    player_id = game_state.socket_to_player.get(conn)
+                    play_land_result = game_engine.play_land(player_id, land_pdu, game_state)
+                    if isinstance(play_land_result, Error):
+                        send_framed_message(conn, play_land_result.model_dump_json().encode('utf-8'))
+                        continue
+                    # Summon succeeded
+                    broadcast_game_state(game_state)
+                    for pdu in play_land_result:
+                        if pdu.type == PDUType.PRIORITY_GRANT:
+                            next_player = game_state.player_sockets.get(pdu.player_id)
+                            send_framed_message(next_player, pdu.model_dump_json().encode('utf-8'))
+
                 case _:
                     send_error_response(
                         conn, 

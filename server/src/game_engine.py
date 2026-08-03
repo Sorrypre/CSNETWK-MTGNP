@@ -222,3 +222,50 @@ class GameEngine:
             time_limit_ms=60000
         )
         return [push_pdu, grant_pdu]
+
+    def play_land(self, player_id: str, land_pdu: PlayLand, game_state: GameState):
+        if game_state.priority_player != player_id or game_state.active_player != player_id:
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="NOT_YOUR_TURN",
+                message="Land can only be played during your turn or when you have priority.",
+                rejected_action=land_pdu.model_dump()
+            )
+        if game_state.current_step not in [InGamePhase.PRE_COMBAT_MAIN, InGamePhase.POST_COMBAT_MAIN]:
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="WRONG_PHASE",
+                message="Lands can only be played during the Main Phase.",
+                rejected_action=land_pdu.model_dump()
+            )
+        player = game_state.players[player_id]
+        if player.lands_played_this_turn >= 1:
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="LAND_LIMIT_REACHED",
+                message="Land already played for this turn.",
+                rejected_action=land_pdu.model_dump()
+            )
+        if land_pdu.card_id not in player.hand:
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="LAND_NOT_IN_HAND",
+                message=f"{land_pdu.card_id} is not in player {player_id}'s hand.",
+                rejected_action=land_pdu.model_dump()
+            )
+        player.hand.remove(land_pdu.card_id)
+        player.battlefield.append({ 'card_id': land_pdu.card_id, 'tapped': False })
+        player.lands_played_this_turn += 1
+        game_state.passes_in_a_row = 0
+        logging.info(f'Player {player_id} plays land: {land_pdu.card_id}')
+        grant_pdu = PriorityGrant(
+            type=PDUType.PRIORITY_GRANT,
+            seq_num=game_state.get_next_seq_num(),
+            player_id=player_id,
+            time_limit_ms=60000
+        )
+        return [grant_pdu]
