@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from schemas import Error, Ping, Pong, PDUType
 from framer import read_framed_message, send_framed_message
 from game_state import GameState
+from game_engine import GameEngine
 from lobby import *
 import logging
 import os
@@ -23,6 +24,7 @@ PORT, MAX_CLIENTS = 4444, 2
 active_connections = []
 connections_lock = threading.Lock()
 game_state = GameState() # Initialize global game state instance
+game_engine = GameEngine() # Initialize global game engine instance
 
 def handle_disconnect(conn, p_id):
     """
@@ -75,6 +77,13 @@ def receive(conn, addr):
 
             msg_type, seq_num = message.get("type"), message.get("seq_num", 0)
 
+            validate_sequence = game_engine.validate_action(msg_type, seq_num, game_state)
+            if validate_sequence:
+                stale_error, new_grant = validate_sequence
+                send_framed_message(conn, stale_error.model_dump_json().encode('utf-8'))
+                send_framed_message(conn, new_grant.model_dump_json().encode('utf-8'))
+                continue #discard illegal actions
+
             # 3. Route actions
             match msg_type:
                 case PDUType.PING:
@@ -95,6 +104,49 @@ def receive(conn, addr):
                 case PDUType.MULLIGAN_CHOICE:
                     handle_mulligan_choice(conn, message, game_state)
 
+                case PDUType.PRIORITY_PASS:
+                    if game_state.phase != "IN_GAME":
+                        send_error_response(conn, seq_num, "WRONG_PHASE", "Game has not started yet.")
+                        continue
+
+                    new_grant = game_engine.handle_priority_pass(game_state)
+
+                    if new_grant:
+                        active_conn = game_state.player_sockets.get(new_grant.player_id)
+                        send_framed_message(active_conn, new_grant.model_dump_json().encode('utf-8'))
+
+                case PDUType.CAST_SPELL:
+                    if game_state.phase != "IN_GAME":
+                        send_error_response(conn, seq_num, "WRONG_PHASE", "Game has not started yet.")
+                        continue
+                    player_id = game_state.socket_to_player.get(conn)
+
+                    try:
+                        spell_pdu = CastSpell(**message)
+                    except ValidationError as ve:
+                        send_error_response(conn, seq_num, "INVALID_PDU", str(ve))
+                        continue
+
+                    #Sent for processing
+                    result = game_engine.cast_spell(player_id, spell_pdu, game_state)
+
+                    #If engine returned an error, send it back to the player
+                    if isinstance(result, Error):
+                        send_framed_message(conn, result.model_dump_json().encode('utf-8'))
+                        continue
+
+                    for pdu in result:
+                        payload_bytes = pdu.model_dump_json().encode('utf-8')
+
+                        # STACK_PUSH broadcasts to ALL players
+                        if pdu.type == PDUType.STACK_PUSH:
+                            for client_conn in game_state.player_sockets.values():
+                                send_framed_message(client_conn, payload_bytes)
+
+                        # PRIORITY_GRANT sends ONLY to the specific player
+                        elif pdu.type == PDUType.PRIORITY_GRANT:
+                            active_conn = game_state.player_sockets.get(pdu.player_id)
+                            send_framed_message(active_conn, payload_bytes)
                 case _:
                     send_error_response(
                         conn, 
