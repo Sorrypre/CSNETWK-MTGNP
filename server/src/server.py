@@ -115,6 +115,38 @@ def receive(conn, addr):
                         active_conn = game_state.player_sockets.get(new_grant.player_id)
                         send_framed_message(active_conn, new_grant.model_dump_json().encode('utf-8'))
 
+                case PDUType.CAST_SPELL:
+                    if game_state.phase != "IN_GAME":
+                        send_error_response(conn, seq_num, "WRONG_PHASE", "Game has not started yet.")
+                        continue
+                    player_id = game_state.socket_to_player.get(conn)
+
+                    try:
+                        spell_pdu = CastSpell(**message)
+                    except ValidationError as ve:
+                        send_error_response(conn, seq_num, "INVALID_PDU", str(ve))
+                        continue
+
+                    #Sent for processing
+                    result = game_engine.cast_spell(player_id, spell_pdu, game_state)
+
+                    #If engine returned an error, send it back to the player
+                    if isinstance(result, Error):
+                        send_framed_message(conn, result.model_dump_json().encode('utf-8'))
+                        continue
+
+                    for pdu in result:
+                        payload_bytes = pdu.model_dump_json().encode('utf-8')
+
+                        # STACK_PUSH broadcasts to ALL players
+                        if pdu.type == PDUType.STACK_PUSH:
+                            for client_conn in game_state.player_sockets.values():
+                                send_framed_message(client_conn, payload_bytes)
+
+                        # PRIORITY_GRANT sends ONLY to the specific player
+                        elif pdu.type == PDUType.PRIORITY_GRANT:
+                            active_conn = game_state.player_sockets.get(pdu.player_id)
+                            send_framed_message(active_conn, payload_bytes)
                 case _:
                     send_error_response(
                         conn, 
