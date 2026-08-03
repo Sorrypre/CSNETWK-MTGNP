@@ -2,32 +2,22 @@ import struct
 import socket
 
 HEADER_SIZE = 4
+HEADER_FORMAT = "!I"
 MAX_PAYLOAD_SIZE = 65535
-
-def send_framed_message(sock: socket.socket, payload_bytes: bytes):
-    """
-    Packs the length of the payload as a 4-byte big-endian integer and 
-    sends it over the socket.
-    """
-    length = len(payload_bytes)
-    header = struct.pack("!I", length) # packs the header into big endian !I
-    sock.sendall(header + payload_bytes) # then sends it off
 
 def recv_exact(sock: socket.socket, num_bytes: int) -> bytes:
     """
-    Collects all requested bytes properly by reading 
-    exactly num_bytes from a TCP stream.
+    Reads exact number of bytes or raises ConnectionError/TimeoutError.
     """
     buffer = bytearray()
     while len(buffer) < num_bytes:
-        """
-        sock.recv might not read all bytes at once so 
-        will loop through until the total number of bytes is met
-        """
-        packet = sock.recv(num_bytes - len(buffer)) 
-        if not packet:
-            return None  # Client disconnected
-        buffer.extend(packet)
+        try:
+            chunk = sock.recv(num_bytes - len(buffer))
+            if not chunk:
+                raise ConnectionError("Client closed connection")
+            buffer.extend(chunk)
+        except socket.timeout:
+            raise TimeoutError("10-second inactivity timeout reached.")
     return bytes(buffer)
 
 def read_framed_message(sock: socket.socket) -> bytes:
@@ -43,14 +33,18 @@ def read_framed_message(sock: socket.socket) -> bytes:
         raise ConnectionError("Client disconnected while reading header")
 
     # Unpack 4-byte big-endian unsigned integer
-    payload_length = struct.unpack("!I", header_bytes)[0]
+    payload_length = struct.unpack(HEADER_FORMAT, header_bytes)[0]
 
     # Reject messages exceeding 65,535 bytes per spec
     if payload_length > MAX_PAYLOAD_SIZE:
         raise ValueError(f"Payload size {payload_length} exceeds limit of {MAX_PAYLOAD_SIZE} bytes")
 
-    payload_bytes = recv_exact(sock, payload_length)
-    if payload_bytes is None or len(payload_bytes) < payload_length:
-        raise ConnectionError("Client disconnected before full payload was received")
+    return recv_exact(sock, payload_length)
 
-    return payload_bytes
+def send_framed_message(sock: socket.socket, payload_bytes: bytes) -> None:
+    """
+    Frames and sends payload with 4-byte big-endian length prefix.
+    """
+    if len(payload_bytes) > MAX_PAYLOAD_SIZE:
+        raise ValueError(f"Payload exceeds limit of {MAX_PAYLOAD_SIZE} bytes")
+    sock.sendall(struct.pack(HEADER_FORMAT, len(payload_bytes)) + payload_bytes)
