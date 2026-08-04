@@ -40,7 +40,13 @@ def handle_disconnect(conn, p_id):
         winner_id = list(game_state.players.keys())[0]
         winner_conn = game_state.player_sockets.get(winner_id)
         if winner_conn:
-            pdu = GameOver(seq_num=game_state.get_next_seq_num(), winner_id=winner_id, loser_id=p_id, reason="DISCONNECT")
+            pdu = GameOver(
+                type=PDUType.GAME_OVER,
+                seq_num=game_state.get_next_seq_num(),
+                winner_id=winner_id,
+                loser_id=p_id,
+                reason="DISCONNECT"
+            )
             try: send_framed_message(winner_conn, pdu.model_dump_json().encode('utf-8'))
             except Exception:pass
 
@@ -114,6 +120,28 @@ def receive(conn, addr):
 
                     case PDUType.MULLIGAN_CHOICE:
                         handle_mulligan_choice(conn, message, game_state)
+
+                        if game_state.phase == "IN_GAME" and game_state.current_step == "UNTAP":
+                            #Advances to UPKEEP and generates the PRIORITY_GRANT
+                            result = game_engine.advance_phase(game_state)
+
+                            if result:
+                                for pdu in result:
+                                    payload_bytes = pdu.model_dump_json().encode('utf-8')
+
+                                    if pdu.type in [PDUType.PHASE_TRANSITION, PDUType.GAME_OVER]:
+                                        for client_conn in game_state.player_sockets.values():
+                                            send_framed_message(client_conn, payload_bytes)
+
+                                    elif pdu.type == PDUType.PRIORITY_GRANT:
+                                        active_conn = game_state.player_sockets.get(pdu.player_id)
+                                        if active_conn:
+                                            send_framed_message(active_conn, payload_bytes)
+
+                                            #Start a 60 second timer for the player to respond
+                                            timer = threading.Timer(60.0, priority_timeout, args=[pdu.player_id])
+                                            priority_timer[pdu.player_id] = timer
+                                            timer.start()
 
                     case PDUType.PRIORITY_PASS:
                         if game_state.phase != "IN_GAME":
@@ -199,6 +227,7 @@ def receive(conn, addr):
                         winner_id = players[1] if player_id == players[0] else players[0]
 
                         game_over_pdu = GameOver(
+                            type=PDUType.GAME_OVER,
                             seq_num=game_state.get_next_seq_num(),
                             winner_id=winner_id,
                             loser_id=player_id,
@@ -252,6 +281,7 @@ def priority_timeout(timed_out_player_id: str):
         winner = players[1] if timed_out_player_id == players[0] else players[0]
 
         game_over_pdu = GameOver(
+            type=PDUType.GAME_OVER,
             seq_num=game_state.get_next_seq_num(),
             winner_id=winner,
             loser_id=timed_out_player_id,
