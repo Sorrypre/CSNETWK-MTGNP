@@ -141,7 +141,7 @@ def receive(conn, addr):
                         continue
 
                     #Sent for processing
-                    result = game_engine.cast_spell(player_id, spell_pdu, game_state)
+                    result = game_engine.handle_cast_spell(player_id, spell_pdu, game_state)
 
                     #If engine returned an error, send it back to the player
                     if isinstance(result, Error):

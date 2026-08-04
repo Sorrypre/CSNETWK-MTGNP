@@ -201,7 +201,7 @@ class GameEngine:
 
         return [resolved_pdu, grant_pdu]
 
-    def cast_spell(self, player_id: str, spell_pdu: CastSpell, game_state: GameState) -> List[BaseModel] | Error:
+    def handle_cast_spell(self, player_id: str, spell_pdu: CastSpell, game_state: GameState) -> List[BaseModel] | Error:
         """
         Pushes a cast spell onto the stack and re-grants priority to the caster.
         """
@@ -218,27 +218,16 @@ class GameEngine:
             logging.warning(f"[ENGINE ERROR] Player {player_id} attempted to cast a spell without priority.")
             return error_pdu
 
-        # TODO: di pa impl ang cards.json, pero i think need ng check dito if
-        # the cost in spell_pdu matches the data from cards.json to avoid exploiting
-
+        # TODO: check dito the cost in spell_pdu matches the data from cards.json to avoid exploiting
+        
         player = game_state.players[player_id]
-        land_taps = []
-        for land_id, mana_cost in spell_pdu.mana_payment.items():
-            untapped_lands = []
-            for card in player.battlefield:
-                if card['card_id'] == land_id and not card.get('tapped', False):
-                    untapped_lands.append(card)
-            if len(untapped_lands) < mana_cost:
-                error_pdu = Error(
-                    type=PDUType.ERROR,
-                    seq_num=game_state.get_next_seq_num(),
-                    code="INSUFFICIENT_MANA",
-                    message=f"Player {player_id} has insufficient mana to cast the spell."
-                )
-                return error_pdu
-            land_taps.extend(untapped_lands[:mana_cost])
-        for land in land_taps:
-            land['tapped'] = True
+        if not player.pay_mana(spell_pdu.mana_payment):
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="INSUFFICIENT_MANA",
+                message=f"Player {player_id} has insufficient mana to cast the spell."
+            )
         
         #Reset passes since an action was taken
         game_state.passes_in_a_row = 0
@@ -455,14 +444,6 @@ class GameEngine:
         pdu_list.append(grant_pdu)
         return pdu_list
 
-    def raw_discard(self, player_state: PlayerState, card_ids: List[str]):
-        # need ihiwalay para maiseparate ung discard event ng ACTIVATE_ABILITY
-        # kasi kung gagawa pa tayo ng separate PDU for ability discards baka mahirapan pa tayo
-        for card_id in card_ids:
-            if card_id in player_state.hand:
-                player_state.hand.remove(card_id)
-                player_state.graveyard.append(card_id)
-
     def cleanup_discard(self, player_id: str, discard_pdu: Discard, game_state: GameState):
         if game_state.current_step != InGamePhase.CLEANUP:
             return Error(
@@ -502,7 +483,6 @@ class GameEngine:
                     code="DISCARD_NON_EXISTENT",
                     message=f"{card_id} was not found in player {player_id}'s hand during execution."
                 )
-            self.raw_discard(player, discard_pdu.card_ids)
-            logging.info(f'Player {player_id} discarded card {card_id}.')
+        player.raw_discard(discard_pdu.card_ids)
         logging.info(f'Player {player_id} discarded a total of {hand_diff} card{'s' if hand_diff > 1 else ''}.')
         return self.advance_phase(game_state)
