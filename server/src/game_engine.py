@@ -137,6 +137,11 @@ class GameEngine:
                 time_limit_ms=60000
             )
             logging.debug(f"[ENGINE SEND] Phase transition. Generated PDUs: PHASE_TRANSITION ({next_step}), PRIORITY_GRANT")
+
+            sba_results = self.check_state_based_action(game_state)
+            if sba_results:
+                return sba_results
+
             return [transition_pdu, grant_pdu]
 
     def resolve_stack(self, game_state: GameState):
@@ -175,6 +180,10 @@ class GameEngine:
             player_id=game_state.priority_player,
             time_limit_ms=60000
         )
+
+        sba_results = self.check_state_based_action(game_state)
+        if sba_results:
+            return sba_results
 
         logging.info(f"Stack item {resolved_item['stack_item_id']} resolved.")
         logging.debug(f"[ENGINE SEND] Stack item resolved. Generated PDUs: STACK_RESOLVE, PRIORITY_GRANT")
@@ -234,6 +243,10 @@ class GameEngine:
             player_id=player_id,
             time_limit_ms=60000
         )
+
+        sba_results = self.check_state_based_action(game_state)
+        if sba_results:
+            return sba_results
         return [push_pdu, grant_pdu]
 
     def is_target_valid(self, target_id: str, game_state: GameState) -> bool:
@@ -251,3 +264,59 @@ class GameEngine:
                 if permanent.get("id") == target_id:
                     return True
         return False
+
+    def check_state_based_action(self, game_state: GameState) -> List[BaseModel]:
+        """
+        Evaluates State-Based Actions (SBAs) and generates corresponding PDUs if any conditions are met.
+        """
+        generated_pdus = []
+
+        players = list(game_state.players.keys())
+        p1, p2 = players[0], players[1]
+
+        #Check if either player has 0 or less life
+        is_p1_dead = game_state.players[p1].life <= 0
+        is_p2_dead = game_state.players[p2].life <= 0
+
+        if is_p1_dead or is_p2_dead:
+            #Rule 8.4 if both players die then Active player loses
+            if is_p1_dead and is_p2_dead:
+                loser = game_state.active_player
+                winner = p2 if loser == p1 else p1
+            else:
+                loser = p1 if is_p1_dead else p2
+                winner = p2 if is_p1_dead else p1
+
+            game_over_pdu = GameOver(
+                type=PDUType.GAME_OVER,
+                seq_num=game_state.get_next_seq_num(),
+                winner_id=winner,
+                loser_id=loser,
+                reason="LIFE_ZERO"
+            )
+            logging.info(f"[ENGINE STATE] SBA Triggered: Player {loser} has died.")
+            return [game_over_pdu]
+
+        # Check for dead creatures
+        for player_id, player_state in game_state.players.items():
+            surviving_permanents = []
+
+            for perm in player_state.battlefield:
+                #.get() safely in case non-creature permanents (like lands) are present
+                toughness = perm.get("toughness")
+
+                # If toughness is defined, check if the creature should die due to damage
+                if toughness is not None:
+                    damage = perm.get("damage", 0)
+                    if toughness <= 0 or damage >= toughness:
+                        # Creature dies, move to graveyard
+                        player_state.graveyard.append(perm["id"])
+                        logging.debug(f"[ENGINE STATE] SBA: Creature {perm['id']} died and moved to graveyard.")
+                        continue # Skip adding it to surviving permanents
+
+                surviving_permanents.append(perm)
+
+            # Only include things that survived
+            player_state.battlefield = surviving_permanents
+
+        return generated_pdus
