@@ -1,14 +1,31 @@
-import logging
-import os
-import sys
+import socket
+import struct
+import json
+import threading
 
-# Track two levels up from client.py to find the project root
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-sys.path.insert(0, ROOT)
+def recv_loop(sock):
+    while True:
+        header = sock.recv(4)
+        if not header:
+            print("Server closed connection.")
+            break
+        length = struct.unpack("!I", header)[0]
+        msg = json.loads(sock.recv(length).decode('utf-8'))
+        print(f"\n[SERVER]: {json.dumps(msg, indent=2)}\n> ", end="")
 
-from shared.util.logger_util import setup_app_logging
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.connect(('127.0.0.1', 4444))
 
-setup_app_logging(__file__)
+# Start background thread to listen for server messages
+threading.Thread(target=recv_loop, args=(s,), daemon=True).start()
 
-logging.debug("This is only seen with verbose")
-logging.info("This should be seen always")
+print("Connected! Paste JSON and press Enter to send.")
+while True:
+    try:
+        user_input = input("> ")
+        if user_input.strip():
+            msg_dict = json.loads(user_input)
+            payload = json.dumps(msg_dict).encode('utf-8')
+            s.sendall(struct.pack("!I", len(payload)) + payload)
+    except Exception as e:
+        print(f"Invalid input: {e}")

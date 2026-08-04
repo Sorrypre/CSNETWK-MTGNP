@@ -55,7 +55,7 @@ def receive(conn, addr):
     Receives payload to inspect the big-endian prefix.
     If payload is >65535, catches ValueError and closes thread
     """
-    conn.settimeout(10.0)
+    conn.settimeout(600.0)
     
     print(f'Client connected from {addr}')
     try:
