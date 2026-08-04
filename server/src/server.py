@@ -186,7 +186,7 @@ def receive(conn, addr):
                             next_player = game_state.player_sockets.get(pdu.player_id)
                             send_framed_message(next_player, pdu.model_dump_json().encode('utf-8'))
 
-                case PDUType.DISCARD:
+                case PDUType.DISCARD: # strictly handles CLEANUP only
                     if game_state.phase != "IN_GAME":
                         send_error_response(conn, seq_num, "WRONG_PHASE", "The players are not ingame.")
                         continue

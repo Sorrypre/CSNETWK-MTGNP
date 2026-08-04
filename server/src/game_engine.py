@@ -1,7 +1,7 @@
 from typing import List
 from pydantic import BaseModel
 from schemas import *
-from game_state import GameState
+from game_state import GameState, PlayerState
 import logging
 from enum import StrEnum
 
@@ -401,6 +401,14 @@ class GameEngine:
         )
         return [grant_pdu]
 
+    def raw_discard(self, player_state: PlayerState, card_ids: List[str]):
+        # need ihiwalay para maiseparate ung discard event ng ACTIVATE_ABILITY
+        # kasi kung gagawa pa tayo ng separate PDU for ability discards baka mahirapan pa tayo
+        for card_id in card_ids:
+            if card_id in player_state.hand:
+                player_state.hand.remove(card_id)
+                player_state.graveyard.append(card_id)
+
     def cleanup_discard(self, player_id: str, discard_pdu: Discard, game_state: GameState):
         if game_state.current_step != InGamePhase.CLEANUP:
             return Error(
@@ -440,8 +448,7 @@ class GameEngine:
                     code="DISCARD_NON_EXISTENT",
                     message=f"{card_id} was not found in player {player_id}'s hand during execution."
                 )
-            player.hand.remove(card_id)
-            player.graveyard.append(card_id)
+            self.raw_discard(player, discard_pdu.card_ids)
             logging.info(f'Player {player_id} discarded card {card_id}.')
         logging.info(f'Player {player_id} discarded a total of {hand_diff} card{'s' if hand_diff > 1 else ''}.')
         return self.advance_phase(game_state)
