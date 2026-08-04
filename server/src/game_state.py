@@ -29,7 +29,7 @@ class PlayerState:
         draw_cards - removes cards from library and appends to hand
         """
         drawn = []
-        for _ in range(min(count, len(self.library))):
+        for _ in range(count):
             if self.library:
                 drawn.append(self.library.pop(0))
             else:
