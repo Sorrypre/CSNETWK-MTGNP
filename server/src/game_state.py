@@ -1,6 +1,49 @@
 import random
 from typing import Dict, List, Optional, Any
 
+def extract_base_id(instance_id: str) -> str:
+    """
+        Utility to convert instance IDs into card ID base
+        Ex. mountain_001 -> mountain
+    """
+    return instance_id.rsplit('_', 1)[0]
+
+class CardInstance:
+    """
+    Tracks a single physical card instance
+    This also has runtime attributes for a dynamic state
+    """
+    def __init__(self, instance_id: str, catalog: Dict[str, Any]):
+        self.id: str = instance_id #instance ID 
+        self.base_id: str = extract_base_id(instance_id)
+
+        # Static template rules from the pre-loaded catalog
+        meta = catalog.get(self.base_id, {})
+        self.name: str = meta.get("name", "Unknown") # gets the name attribute and returns 'Unknown if null
+        self.card_type: str = meta.get("type", "")
+        self.base_power: Optional[int] = meta.get("power")
+        self.base_toughness: Optional[int] = meta.get("toughness")
+
+        # Runtime Attributes
+        self.tapped: bool = False
+        self.damage: int = 0
+        self.power: Optional[int] = self.base_power
+        self.toughness: Optional[int] = self.base_toughness
+        self.summoning_sick: bool = True if "Creature" in self.card_type else False
+
+    def to_pdu_dict(self) -> Dict[str, Any]:
+        """
+        Serialize dynamic permanent state for GAME_STATE_UPDATE PDU.
+        """
+        data = {"id": self.id, "tapped": self.tapped}
+        if "Creature" in self.card_type:
+            data.update({
+                "damage": self.damage,
+                "power": self.power,
+                "toughness": self.toughness,
+                "summoning_sick": self.summoning_sick
+            })
+        return data
 class PlayerState:
     """
     Maintains the state of all zones (library, hand, battlefield, graveyard, stack/deck),
