@@ -148,6 +148,10 @@ class GameEngine:
         """
         Pop the top item, applies effects, and re-grants priority
         """
+        # If the stack is empty, return an empty list
+        if not game_state.stack:
+            return []
+
         resolved_item = game_state.stack.pop()
         #Get the targets of the resolved item to check if they are still valid
         targets = resolved_item.get("targets", [])
@@ -190,7 +194,7 @@ class GameEngine:
 
         return [resolved_pdu, grant_pdu]
 
-    def cast_spell(self, player_id: str, spell_pdu: CastSpell, game_state: GameState) -> List[BaseModel] | Error:
+    def handle_cast_spell(self, player_id: str, spell_pdu: CastSpell, game_state: GameState) -> List[BaseModel] | Error:
         """
         Pushes a cast spell onto the stack and re-grants priority to the caster.
         """
@@ -245,8 +249,11 @@ class GameEngine:
         )
 
         sba_results = self.check_state_based_action(game_state)
+
         if sba_results:
-            return sba_results
+            # If the game is over, broadcast the push/resolve, then the game over.
+            return [push_pdu] + sba_results
+
         return [push_pdu, grant_pdu]
 
     def is_target_valid(self, target_id: str, game_state: GameState) -> bool:
@@ -277,6 +284,28 @@ class GameEngine:
         #Check if either player has 0 or less life
         is_p1_dead = game_state.players[p1].life <= 0
         is_p2_dead = game_state.players[p2].life <= 0
+
+        #Check if either player has drawn from an empty deck
+        is_p1_deck_empty = game_state.players[p1].empty_deck_draw
+        is_p2_deck_empty = game_state.players[p2].empty_deck_draw
+
+        if is_p1_deck_empty or is_p2_deck_empty:
+            if is_p1_deck_empty and is_p2_deck_empty:
+                loser = game_state.active_player
+                winner = p2 if loser == p1 else p1
+            else:
+                loser = p1 if is_p1_deck_empty else p2
+                winner = p2 if is_p1_deck_empty else p1
+
+            game_over_pdu = GameOver(
+                type=PDUType.GAME_OVER,
+                seq_num=game_state.get_next_seq_num(),
+                winner_id=winner,
+                loser_id=loser,
+                reason="DECK_EMPTY"
+            )
+            logging.info(f"[ENGINE STATE] SBA Triggered: Player {loser} drew from an empty deck.")
+            return [game_over_pdu]
 
         if is_p1_dead or is_p2_dead:
             #Rule 8.4 if both players die then Active player loses
