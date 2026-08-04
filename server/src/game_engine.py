@@ -184,7 +184,26 @@ class GameEngine:
             )
             logging.warning(f"[ENGINE ERROR] Player {player_id} attempted to cast a spell without priority.")
             return error_pdu
-
+        
+        player = game_state.players[player_id]
+        land_taps = []
+        for land_id, mana_cost in spell_pdu.mana_payment.items():
+            untapped_lands = []
+            for card in player.battlefield:
+                if card['card_id'] == land_id and card.get('tapped', False):
+                    untapped_lands.append(card)
+            if len(untapped_lands) < mana_cost:
+                error_pdu = Error(
+                    type=PDUType.ERROR,
+                    seq_num=game_state.get_next_seq_num(),
+                    code="INSUFFICIENT_MANA",
+                    message=f"Player {player_id} has insufficient mana to cast the spell."
+                )
+                return error_pdu
+            land_taps.extend(untapped_lands[:mana_cost])
+        for land in land_taps:
+            land['tapped'] = True
+        
         #Reset passes since an action was taken
         game_state.passes_in_a_row = 0
 
