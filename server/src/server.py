@@ -108,11 +108,25 @@ def receive(conn, addr):
                         send_error_response(conn, seq_num, "WRONG_PHASE", "Game has not started yet.")
                         continue
 
-                    new_grant = game_engine.handle_priority_pass(game_state)
+                    result = game_engine.handle_priority_pass(game_state)
 
-                    if new_grant:
-                        active_conn = game_state.player_sockets.get(new_grant.player_id)
-                        send_framed_message(active_conn, new_grant.model_dump_json().encode('utf-8'))
+                    if result:
+                        for pdu in result:
+                            payload_bytes = pdu.model_dump_json().encode('utf-8')
+
+                            # Broadcast these to ALL players
+                            if pdu.type in [PDUType.STACK_PUSH, PDUType.STACK_RESOLVE, PDUType.PHASE_TRANSITION, PDUType.GAME_OVER]:
+                                for client_conn in game_state.player_sockets.values():
+                                    send_framed_message(client_conn, payload_bytes)
+
+                                if pdu.type == PDUType.GAME_OVER:
+                                    game_state.phase = "FINISHED"
+
+                            #PRIORITY_GRANT sends ONLY to the specific player
+                            elif pdu.type == PDUType.PRIORITY_GRANT:
+                                active_conn = game_state.player_sockets.get(pdu.player_id)
+                                if active_conn:
+                                    send_framed_message(active_conn, payload_bytes)
 
                 case PDUType.CAST_SPELL:
                     if game_state.phase != "IN_GAME":
@@ -137,15 +151,19 @@ def receive(conn, addr):
                     for pdu in result:
                         payload_bytes = pdu.model_dump_json().encode('utf-8')
 
-                        # STACK_PUSH broadcasts to ALL players
-                        if pdu.type == PDUType.STACK_PUSH:
+                        # Broadcasts to ALL players
+                        if pdu.type in [PDUType.STACK_PUSH, PDUType.STACK_RESOLVE, PDUType.PHASE_TRANSITION, PDUType.GAME_OVER]:
                             for client_conn in game_state.player_sockets.values():
                                 send_framed_message(client_conn, payload_bytes)
+
+                                if pdu.type == PDUType.GAME_OVER:
+                                    game_state.phase = "FINISHED"
 
                         # PRIORITY_GRANT sends ONLY to the specific player
                         elif pdu.type == PDUType.PRIORITY_GRANT:
                             active_conn = game_state.player_sockets.get(pdu.player_id)
-                            send_framed_message(active_conn, payload_bytes)
+                            if active_conn:
+                                send_framed_message(active_conn, payload_bytes)
 
                 case PDUType.PLAY_LAND:
                     if game_state.phase != "IN_GAME":
