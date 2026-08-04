@@ -401,6 +401,60 @@ class GameEngine:
         )
         return [grant_pdu]
 
+    def trigger_order_response(self, player_id: str, response_pdu: TriggerOrderResponse, game_state: GameState):
+        pending = game_state.pending_triggers.get(player_id, [])
+        if not pending:
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="NO_TRIGGER",
+                message=f"Player {player_id}'s trigger stack is empty."
+            )
+        pending_ids = [ trigger["trigger_id"] for trigger in pending ]
+        if set(response_pdu.ordered_trigger_ids) != set(pending_ids):
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="INVALID_TRIGGER",
+                message="Trigger IDs mismatch the current pending stack."
+            )
+        pdu_list: List[StackPush | PriorityGrant] = []
+        for trigger_id in response_pdu.ordered_trigger_ids:
+            trigger_data = None
+            for trigger in pending:
+                if trigger["trigger_id"] == trigger_id:
+                    trigger_data = trigger
+                    break
+            stack_item_id = f"stack_{game_state.get_next_seq_num()}"
+            stack_item = {
+                "stack_item_id": stack_item_id,
+                "item_type": "TRIGGER_ABILITY",
+                "source": trigger_data.get("source_id", "Unknown"),
+                "targets": [],
+                "controller": player_id
+            }
+            game_state.stack.append(stack_item)
+            logging.debug(f"Trigger {trigger_id} pushed into the stack.")
+            pdu_list.append(StackPush(
+                type=PDUType.STACK_PUSH,
+                seq_num=game_state.get_next_seq_num(),
+                stack_item_id=stack_item_id,
+                item_type="TRIGGER_ABILITY",
+                source=trigger_data.get("source_id", "Unknown"),
+                targets=[],
+                controller=player_id
+            ))
+        game_state.pending_triggers[player_id] = []
+        game_state.passes_in_a_row = 0
+        grant_pdu = PriorityGrant(
+            type=PDUType.PRIORITY_GRANT,
+            seq_num=game_state.get_next_seq_num(),
+            player_id=game_state.active_player,
+            time_limit_ms=60000
+        )
+        pdu_list.append(grant_pdu)
+        return pdu_list
+
     def raw_discard(self, player_state: PlayerState, card_ids: List[str]):
         # need ihiwalay para maiseparate ung discard event ng ACTIVATE_ABILITY
         # kasi kung gagawa pa tayo ng separate PDU for ability discards baka mahirapan pa tayo

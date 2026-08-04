@@ -183,8 +183,9 @@ def receive(conn, addr):
                     broadcast_game_state(game_state)
                     for pdu in play_land_result:
                         if pdu.type == PDUType.PRIORITY_GRANT:
-                            next_player = game_state.player_sockets.get(pdu.player_id)
-                            send_framed_message(next_player, pdu.model_dump_json().encode('utf-8'))
+                            active_conn = game_state.player_sockets.get(pdu.player_id)
+                            if active_conn:
+                                send_framed_message(active_conn, pdu.model_dump_json().encode('utf-8'))
 
                 case PDUType.DISCARD: # strictly handles CLEANUP only
                     if game_state.phase != "IN_GAME":
@@ -207,8 +208,33 @@ def receive(conn, addr):
                             for sock in game_state.player_sockets.values():
                                 send_framed_message(sock, payload_bytes)
                         elif pdu.type == PDUType.PRIORITY_GRANT:
-                            next_player = game_state.player_sockets.get(pdu.player_id)
-                            send_framed_message(next_player, payload_bytes)
+                            active_conn = game_state.player_sockets.get(pdu.player_id)
+                            if active_conn:
+                                send_framed_message(active_conn, payload_bytes)
+
+                case PDUType.TRIGGER_ORDER_RESPONSE:
+                    if game_state.phase != "IN_GAME":
+                        send_error_response(conn, seq_num, "WRONG_PHASE", "The players are not ingame.")
+                        continue
+                    try:
+                        trigger_pdu = TriggerOrderResponse(**message)
+                    except ValidationError as ve:
+                        send_error_response(conn, seq_num, "INVALID_PDU", str(ve))
+                        continue
+                    player_id = game_state.socket_to_player.get(conn)
+                    tor_result = game_engine.trigger_order_response(player_id, trigger_pdu, game_state)
+                    if isinstance(tor_result, Error):
+                        send_framed_message(conn, tor_result.model_dump_json().encode('utf-8'))
+                        continue
+                    for pdu in tor_result:
+                        payload_bytes = pdu.model_dump_json().encode('utf-8')
+                        if pdu.type == PDUType.STACK_PUSH:
+                            for sock in game_state.player_sockets.values():
+                                send_framed_message(sock, payload_bytes)
+                        elif pdu.type == PDUType.PRIORITY_GRANT:
+                            active_conn = game_state.player_sockets.get(pdu.player_id)
+                            if active_conn:
+                                send_framed_message(active_conn, payload_bytes)
 
                 case _:
                     send_error_response(

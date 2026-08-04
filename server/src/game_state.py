@@ -62,6 +62,7 @@ class GameState:
         self.priority_player: Optional[str] = None
         self.passes_in_a_row: int = 0
         self.stack: List[Dict[str, Any]] = []      # Pending spells / abilities on the stack
+        self.pending_triggers: Dict[str, List[Dict[str, Any]]] = {} # trigger order list
         
     def get_next_seq_num(self) -> int:
         """
