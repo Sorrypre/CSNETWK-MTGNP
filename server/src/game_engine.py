@@ -184,13 +184,16 @@ class GameEngine:
             )
             logging.warning(f"[ENGINE ERROR] Player {player_id} attempted to cast a spell without priority.")
             return error_pdu
-        
+
+        # TODO: di pa impl ang cards.json, pero i think need ng check dito if
+        # the cost in spell_pdu matches the data from cards.json to avoid exploiting
+
         player = game_state.players[player_id]
         land_taps = []
         for land_id, mana_cost in spell_pdu.mana_payment.items():
             untapped_lands = []
             for card in player.battlefield:
-                if card['card_id'] == land_id and card.get('tapped', False):
+                if card['card_id'] == land_id and not card.get('tapped', False):
                     untapped_lands.append(card)
             if len(untapped_lands) < mana_cost:
                 error_pdu = Error(
