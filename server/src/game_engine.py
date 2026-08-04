@@ -144,12 +144,25 @@ class GameEngine:
         Pop the top item, applies effects, and re-grants priority
         """
         resolved_item = game_state.stack.pop()
+        #Get the targets of the resolved item to check if they are still valid
+        targets = resolved_item.get("targets", [])
+
+        #Assume the spell resolves successfully unless we find no legal targets
+        result_status = "RESOLVED"
+
+        if len(targets) > 0:
+            legal_targets = [t for t in targets if self.is_target_valid(t, game_state)]
+
+            #No legal targets means the spell fizzles
+            if len(legal_targets) == 0:
+                result_status = "FIZZLE"
+                logging.info(f"Stack item {resolved_item['stack_item_id']} fizzled due to no legal targets.")
 
         resolved_pdu = StackResolve(
             type=PDUType.STACK_RESOLVE,
             seq_num=game_state.get_next_seq_num(),
             stack_item_id=resolved_item["stack_item_id"],
-            result="RESOLVED",
+            result=result_status,
             state_changes=[]
         )
 
@@ -222,3 +235,19 @@ class GameEngine:
             time_limit_ms=60000
         )
         return [push_pdu, grant_pdu]
+
+    def is_target_valid(self, target_id: str, game_state: GameState) -> bool:
+        """
+        Validates if a given target ID is valid in the current game state.
+        """
+        # Check if the target is a player
+        if target_id in game_state.players:
+            return True
+
+        # Is the target permanent on the battlefield
+        for player in game_state.players.values():
+            for permanent in player.battlefield:
+                #depends on how battlefield dict is structured
+                if permanent.get("id") == target_id:
+                    return True
+        return False
