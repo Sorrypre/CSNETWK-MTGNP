@@ -123,11 +123,24 @@ class GameEngine:
             turn=game_state.turn_number
         )
 
-        if next_step in [InGamePhase.UNTAP, InGamePhase.CLEANUP]:
+        if next_step == InGamePhase.UNTAP:
+            # not sure if meron pang need gawin sa untap phase,
+            # pero for now same code lang muna sya as before ko inisplit
+            # ung untap and cleanup conditions
+            active_player = game_state.players[game_state.active_player]
             #No priority granted during these phases
             game_state.priority_player = None
             logging.debug(f"[ENGINE SEND] Phase transition (No Priority). Generated PDU: PHASE_TRANSITION ({next_step})")
             return [transition_pdu]
+        elif next_step == InGamePhase.CLEANUP:
+            active_player = game_state.players[game_state.active_player]
+            hand_diff = len(active_player.hand) - 7
+            if hand_diff > 0: # need magtapon
+                logging.info(f'Player {active_player} needs to discard {hand_diff} card{'s' if hand_diff > 1 else ''}.')
+                return [transition_pdu]
+            else: # cleanup ok
+                next_pdu = self.advance_phase(game_state)
+                return [transition_pdu] + next_pdu
         else:
             game_state.priority_player = game_state.active_player
             grant_pdu = PriorityGrant(
@@ -137,11 +150,9 @@ class GameEngine:
                 time_limit_ms=60000
             )
             logging.debug(f"[ENGINE SEND] Phase transition. Generated PDUs: PHASE_TRANSITION ({next_step}), PRIORITY_GRANT")
-
             sba_results = self.check_state_based_action(game_state)
             if sba_results:
                 return sba_results
-
             return [transition_pdu, grant_pdu]
 
     def resolve_stack(self, game_state: GameState):
@@ -389,3 +400,48 @@ class GameEngine:
             time_limit_ms=60000
         )
         return [grant_pdu]
+
+    def cleanup_discard(self, player_id: str, discard_pdu: Discard, game_state: GameState):
+        if game_state.current_step != InGamePhase.CLEANUP:
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="WRONG_PHASE",
+                message="This discard type only happens during CLEANUP phase."
+            )
+        if game_state.active_player != player_id:
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="NOT_YOUR_TURN",
+                message="Only the active player can discard through this discard type."
+            )
+        player = game_state.players[player_id]
+        hand_diff = len(player.hand) - 7
+        if hand_diff <= 0:
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="NO_CLEANUP_DISCARD",
+                message="Cleanup discards only happen when there are more than 7 cards in a player's hand."
+            )
+        if len(discard_pdu.card_ids) != hand_diff:
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="DISCARD_COUNT_MISMATCH",
+                message=f"{hand_diff} card{'s' if hand_diff > 1 else ''} must be discarded by player {player_id}."
+            )
+        for card_id in discard_pdu.card_ids:
+            if card_id not in player.hand:
+                return Error(
+                    type=PDUType.ERROR,
+                    seq_num=game_state.get_next_seq_num(),
+                    code="DISCARD_NON_EXISTENT",
+                    message=f"{card_id} was not found in player {player_id}'s hand during execution."
+                )
+            player.hand.remove(card_id)
+            player.graveyard.append(card_id)
+            logging.info(f'Player {player_id} discarded card {card_id}.')
+        logging.info(f'Player {player_id} discarded a total of {hand_diff} card{'s' if hand_diff > 1 else ''}.')
+        return self.advance_phase(game_state)
