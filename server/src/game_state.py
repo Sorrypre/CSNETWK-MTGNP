@@ -155,6 +155,12 @@ class GameState:
         self.player_sockets: Dict[str, Any] = {}
         self.active_player: Optional[str] = None
         self.seq_num: int = 1
+        self.pending_triggers: Dict[str, List[Dict[str, Any]]] = {}
+
+        self.attackers: List[str] = [] # List of attacking card instance_ids
+        self.blockers: Dict[str, str] = {} # Maps blocker_instance_id -> attacker_instance_id
+
+        self.damage_orders: Dict[str, List[str]] = {}  # Maps attacker_id -> [blocker_id1, blocker_id2, ...]
 
         self.turn_number: int = 1
         self.current_turn_phase: str = "BEGINNING" # BEGINNING, MAIN_1, COMBAT, MAIN_2, END
@@ -221,4 +227,13 @@ class GameState:
         self.active_player = None
         self.turn_number = 0
         self.passes_in_a_row = 0
+
+    def reset_combat_state(self):
+        """
+        Clears attacker and blocker mappings at the end of combat.
+        Also clears damage orders
+        """
+        self.attackers.clear()
+        self.blockers.clear()
+        self.damage_orders.clear()
 
