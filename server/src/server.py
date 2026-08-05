@@ -23,8 +23,10 @@ setup_app_logging(__file__)
 PORT, MAX_CLIENTS = 4444, 2
 active_connections = []
 connections_lock = threading.Lock()
+game_lock = threading.Lock() # Lock for synchronizing access to game state
 game_state = GameState() # Initialize global game state instance
 game_engine = GameEngine() # Initialize global game engine instance
+priority_timer = {} #Track priority timers for each player
 
 def handle_disconnect(conn, p_id):
     """
@@ -38,10 +40,19 @@ def handle_disconnect(conn, p_id):
         winner_id = list(game_state.players.keys())[0]
         winner_conn = game_state.player_sockets.get(winner_id)
         if winner_conn:
-            pdu = GameOver(seq_num=game_state.get_next_seq_num(), winner_id=winner_id, loser_id=p_id, reason="DISCONNECT")
+            pdu = GameOver(
+                type=PDUType.GAME_OVER,
+                seq_num=game_state.get_next_seq_num(),
+                winner_id=winner_id,
+                loser_id=p_id,
+                reason="DISCONNECT"
+            )
             try: send_framed_message(winner_conn, pdu.model_dump_json().encode('utf-8'))
-            except Exception: pass
-        game_state.phase = "FINISHED"
+            except Exception:pass
+
+        #Reset the game state after a player disconnects
+        game_state.reset_game_state()
+        broadcast_game_state(game_state)
     elif game_state.phase == "LOBBY":
         broadcast_game_state(game_state)
 
@@ -77,108 +88,175 @@ def receive(conn, addr):
 
             msg_type, seq_num = message.get("type"), message.get("seq_num", 0)
 
-            validate_sequence = game_engine.validate_action(msg_type, seq_num, game_state)
-            if validate_sequence:
-                stale_error, new_grant = validate_sequence
-                send_framed_message(conn, stale_error.model_dump_json().encode('utf-8'))
-                send_framed_message(conn, new_grant.model_dump_json().encode('utf-8'))
-                continue #discard illegal actions
+            with game_lock:
+                validate_sequence = game_engine.validate_action(msg_type, seq_num, game_state)
+                if validate_sequence:
+                    stale_error, new_grant = validate_sequence
+                    send_framed_message(conn, stale_error.model_dump_json().encode('utf-8'))
+                    send_framed_message(conn, new_grant.model_dump_json().encode('utf-8'))
+                    continue #discard illegal actions
 
-            # 3. Route actions
-            match msg_type:
-                case PDUType.PING:
-                    try:
-                        ping = Ping(**message)
-                        pong = Pong(seq_num=ping.seq_num, timestamp=ping.timestamp)
-                        send_framed_message(conn, pong.model_dump_json().encode('utf-8'))
-                    except ValidationError as ve:
-                        send_error_response(
-                            conn, 
-                            seq_num, 
-                            "MALFORMED_PING", 
-                            str(ve))
+                #Cancel any existing priority timer for this player
+                player_id = game_state.socket_to_player.get(conn)
+                if player_id in priority_timer:
+                    priority_timer[player_id].cancel()
 
-                case PDUType.PLAYER_READY:
-                    handle_player_ready(conn, message, game_state)
+                # 3. Route actions
+                match msg_type:
+                    case PDUType.PING:
+                        try:
+                            ping = Ping(**message)
+                            pong = Pong(seq_num=ping.seq_num, timestamp=ping.timestamp)
+                            send_framed_message(conn, pong.model_dump_json().encode('utf-8'))
+                        except ValidationError as ve:
+                            send_error_response(
+                                conn,
+                                seq_num,
+                                "MALFORMED_PING",
+                                str(ve))
 
-                case PDUType.MULLIGAN_CHOICE:
-                    handle_mulligan_choice(conn, message, game_state)
+                    case PDUType.PLAYER_READY:
+                        handle_player_ready(conn, message, game_state)
 
-                case PDUType.PRIORITY_PASS:
-                    if game_state.phase != "IN_GAME":
-                        send_error_response(conn, seq_num, "WRONG_PHASE", "Game has not started yet.")
-                        continue
+                    case PDUType.MULLIGAN_CHOICE:
+                        handle_mulligan_choice(conn, message, game_state)
 
-                    result = game_engine.handle_priority_pass(game_state)
+                        if game_state.phase == "IN_GAME" and game_state.current_step == "UNTAP":
+                            #Advances to UPKEEP and generates the PRIORITY_GRANT
+                            result = game_engine.advance_phase(game_state)
 
-                    if result:
+                            if result:
+                                for pdu in result:
+                                    payload_bytes = pdu.model_dump_json().encode('utf-8')
+
+                                    if pdu.type in [PDUType.PHASE_TRANSITION, PDUType.GAME_OVER]:
+                                        for client_conn in game_state.player_sockets.values():
+                                            send_framed_message(client_conn, payload_bytes)
+
+                                    elif pdu.type == PDUType.PRIORITY_GRANT:
+                                        active_conn = game_state.player_sockets.get(pdu.player_id)
+                                        if active_conn:
+                                            send_framed_message(active_conn, payload_bytes)
+
+                                            #Start a 60 second timer for the player to respond
+                                            timer = threading.Timer(60.0, priority_timeout, args=[pdu.player_id])
+                                            priority_timer[pdu.player_id] = timer
+                                            timer.start()
+
+                    case PDUType.PRIORITY_PASS:
+                        if game_state.phase != "IN_GAME":
+                            send_error_response(conn, seq_num, "WRONG_PHASE", "Game has not started yet.")
+                            continue
+
+                        result = game_engine.handle_priority_pass(game_state)
+
+                        if result:
+                            for pdu in result:
+                                payload_bytes = pdu.model_dump_json().encode('utf-8')
+
+                                # Broadcast these to ALL players
+                                if pdu.type in [PDUType.STACK_PUSH, PDUType.STACK_RESOLVE, PDUType.PHASE_TRANSITION, PDUType.GAME_OVER]:
+                                    for client_conn in game_state.player_sockets.values():
+                                        send_framed_message(client_conn, payload_bytes)
+
+                                    if pdu.type == PDUType.GAME_OVER:
+                                        game_state.phase = "FINISHED"
+
+                                #PRIORITY_GRANT sends ONLY to the specific player
+                                elif pdu.type == PDUType.PRIORITY_GRANT:
+                                    active_conn = game_state.player_sockets.get(pdu.player_id)
+                                    if active_conn:
+                                        send_framed_message(active_conn, payload_bytes)
+
+                                        #Start a 60 second timer for the player to respond
+                                        timer = threading.Timer(60.0, priority_timeout, args=[pdu.player_id])
+                                        priority_timer[pdu.player_id] = timer
+                                        timer.start()
+
+                    case PDUType.CAST_SPELL:
+                        if game_state.phase != "IN_GAME":
+                            send_error_response(conn, seq_num, "WRONG_PHASE", "Game has not started yet.")
+                            continue
+                        player_id = game_state.socket_to_player.get(conn)
+
+                        try:
+                            spell_pdu = CastSpell(**message)
+                        except ValidationError as ve:
+                            send_error_response(conn, seq_num, "INVALID_PDU", str(ve))
+                            continue
+
+                        #Sent for processing
+                        result = game_engine.handle_cast_spell(player_id, spell_pdu, game_state)
+
+                        #If engine returned an error, send it back to the player
+                        if isinstance(result, Error):
+                            send_framed_message(conn, result.model_dump_json().encode('utf-8'))
+                            continue
+
                         for pdu in result:
                             payload_bytes = pdu.model_dump_json().encode('utf-8')
 
-                            # Broadcast these to ALL players
+                            # Broadcasts to ALL players
                             if pdu.type in [PDUType.STACK_PUSH, PDUType.STACK_RESOLVE, PDUType.PHASE_TRANSITION, PDUType.GAME_OVER]:
                                 for client_conn in game_state.player_sockets.values():
                                     send_framed_message(client_conn, payload_bytes)
 
-                                if pdu.type == PDUType.GAME_OVER:
-                                    game_state.phase = "FINISHED"
+                                    if pdu.type == PDUType.GAME_OVER:
+                                        game_state.phase = "FINISHED"
 
-                            #PRIORITY_GRANT sends ONLY to the specific player
+                            # PRIORITY_GRANT sends ONLY to the specific player
                             elif pdu.type == PDUType.PRIORITY_GRANT:
                                 active_conn = game_state.player_sockets.get(pdu.player_id)
                                 if active_conn:
                                     send_framed_message(active_conn, payload_bytes)
 
-                case PDUType.CAST_SPELL:
-                    if game_state.phase != "IN_GAME":
-                        send_error_response(conn, seq_num, "WRONG_PHASE", "Game has not started yet.")
-                        continue
-                    player_id = game_state.socket_to_player.get(conn)
+                                    #Start a 60 second timer for the player to respond
+                                    timer = threading.Timer(60.0, priority_timeout, args=[pdu.player_id])
+                                    priority_timer[pdu.player_id] = timer
+                                    timer.start()
 
-                    try:
-                        spell_pdu = CastSpell(**message)
-                    except ValidationError as ve:
-                        send_error_response(conn, seq_num, "INVALID_PDU", str(ve))
-                        continue
+                    case PDUType.CONCEDE:
+                        #Get the conceding player's ID
+                        player_id = game_state.socket_to_player.get(conn)
 
-                    #Sent for processing
-                    result = game_engine.cast_spell(player_id, spell_pdu, game_state)
+                        #Validate that the player is in the game state
+                        if player_id not in game_state.players:
+                            continue;
 
-                    #If engine returned an error, send it back to the player
-                    if isinstance(result, Error):
-                        send_framed_message(conn, result.model_dump_json().encode('utf-8'))
-                        continue
+                        players = list(game_state.players.keys())
+                        winner_id = players[1] if player_id == players[0] else players[0]
 
-                    for pdu in result:
-                        payload_bytes = pdu.model_dump_json().encode('utf-8')
+                        game_over_pdu = GameOver(
+                            type=PDUType.GAME_OVER,
+                            seq_num=game_state.get_next_seq_num(),
+                            winner_id=winner_id,
+                            loser_id=player_id,
+                            reason="CONCEDE"
+                        )
 
-                        # Broadcasts to ALL players
-                        if pdu.type in [PDUType.STACK_PUSH, PDUType.STACK_RESOLVE, PDUType.PHASE_TRANSITION, PDUType.GAME_OVER]:
-                            for client_conn in game_state.player_sockets.values():
-                                send_framed_message(client_conn, payload_bytes)
+                        payload_bytes = game_over_pdu.model_dump_json().encode('utf-8')
+                        for client_conn in game_state.player_sockets.values():
+                            send_framed_message(client_conn, payload_bytes)
 
-                                if pdu.type == PDUType.GAME_OVER:
-                                    game_state.phase = "FINISHED"
+                        #Reset the game state after a player concedes
+                        game_state.reset_game_state()
 
-                        # PRIORITY_GRANT sends ONLY to the specific player
-                        elif pdu.type == PDUType.PRIORITY_GRANT:
-                            active_conn = game_state.player_sockets.get(pdu.player_id)
-                            if active_conn:
-                                send_framed_message(active_conn, payload_bytes)
-                case _:
-                    send_error_response(
-                        conn, 
-                        seq_num, 
-                        "UNRECOGNIZED_PDU", 
-                        f"PDU '{msg_type}' unhandled.", 
-                        rejected_action=message)
+                        #Broadcast the updated game state to all players in the lobby
+                        broadcast_game_state(game_state)
+                    case _:
+                        send_error_response(
+                            conn,
+                            seq_num,
+                            "UNRECOGNIZED_PDU",
+                            f"PDU '{msg_type}' unhandled.",
+                            rejected_action=message)
 
-            print(f'Received from {addr}: {message}')
+                print(f'Received from {addr}: {message}')
     finally:
         with connections_lock:
             if conn in active_connections:
                 active_connections.remove(conn)
-            
+
             # Clean up game state mappings if player disconnects
             p_id = game_state.socket_to_player.pop(conn, None)
             handle_disconnect(conn, p_id)
@@ -187,6 +265,38 @@ def receive(conn, addr):
             conn.close()
             print(f'Connection closed for {addr}')
         except Exception: pass
+
+def priority_timeout(timed_out_player_id: str):
+    """"
+    Runs when a player fails to respond within priority timelimit.
+    """
+    with game_lock:
+        #Checks if the player is still in the game and has priority
+        if game_state.phase != "IN_GAME":
+            return
+
+        logging.warning(f"[TIMEOUT] Player {timed_out_player_id} has failed to respond in time.")
+
+        players = list(game_state.players.keys())
+        winner = players[1] if timed_out_player_id == players[0] else players[0]
+
+        game_over_pdu = GameOver(
+            type=PDUType.GAME_OVER,
+            seq_num=game_state.get_next_seq_num(),
+            winner_id=winner,
+            loser_id=timed_out_player_id,
+            reason="DISCONNECT"
+        )
+
+        payload = game_over_pdu.model_dump_json().encode('utf-8')
+        for client_conn in game_state.player_sockets.values():
+            send_framed_message(client_conn, payload)
+
+        #Reset the game state after a player timeouts
+        game_state.reset_game_state()
+
+        #Broadcast the updated game state to all players in the lobby
+        broadcast_game_state(game_state)
         
 def main():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
