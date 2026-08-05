@@ -1,6 +1,8 @@
 import os
 import json
 import random
+import logging
+from schemas import PDUType, Error, CastSpell
 from typing import Dict, List, Optional, Any
 
 # Resolve project root: server/src/ -> server/ -> CSNETWK-MTGNP/
@@ -89,6 +91,29 @@ class PlayerState:
         self.hand.extend(drawn)
         return drawn
 
+    def raw_discard(self, card_ids: List[str]):
+        # need ihiwalay para maiseparate ung discard event ng ACTIVATE_ABILITY
+        # kasi kung gagawa pa tayo ng separate PDU for ability discards baka mahirapan pa tayo
+        for card_id in card_ids:
+            if card_id in self.hand:
+                self.hand.remove(card_id)
+                self.graveyard.append(card_id)
+                logging.info(f'Player {self.player_id} discarded card {card_id}.')
+
+    def pay_mana(self, mana_payment: Dict[str, int]):
+        land_taps = []
+        for land_id, mana_cost in mana_payment.items():
+            untapped_lands = []
+            for card in self.battlefield:
+                if card['card_id'] == land_id and not card.get('tapped', False):
+                    untapped_lands.append(card)
+            if len(untapped_lands) < mana_cost:
+                return False
+            land_taps.extend(untapped_lands[:mana_cost])
+        for land in land_taps:
+            land['tapped'] = True
+        return True
+
     def reset_hand_to_library(self):
         """
         Moves all hand cards to library and reshuffles
@@ -137,6 +162,7 @@ class GameState:
         self.priority_player: Optional[str] = None
         self.passes_in_a_row: int = 0
         self.stack: List[Dict[str, Any]] = []      # Pending spells / abilities on the stack
+        self.pending_triggers: Dict[str, List[Dict[str, Any]]] = {} # trigger order list
 
     def _load_catalog(self, catalog_path: str) -> Dict[str, Any]:
         """Loads static rules catalog into memory at server startup."""
