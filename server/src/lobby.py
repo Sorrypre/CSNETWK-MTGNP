@@ -199,6 +199,7 @@ def handle_mulligan_choice(conn, payload: dict, game_state):
 
     # Check if all mulligans resolved
     if game_state.is_all_mulligans_resolved():
+        game_state.start_main_game()
         game_state.phase = "IN_GAME"
         print("[GAME] All mulligans resolved. Match status -> IN_GAME")
 

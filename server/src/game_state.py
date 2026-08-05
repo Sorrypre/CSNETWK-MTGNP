@@ -73,6 +73,7 @@ class PlayerState:
         self.life: int = 20
         self.mulligan_count: int = 0
         self.has_kept_hand: bool = False
+        self.empty_deck_draw = False
         self.catalog: Dict[str, Any] = catalog
 
 
@@ -81,9 +82,12 @@ class PlayerState:
         draw_cards - removes cards from library and appends to hand
         """
         drawn = []
-        for _ in range(min(count, len(self.library))):
+        for _ in range(count):
             if self.library:
                 drawn.append(self.library.pop(0))
+            else:
+                self.empty_deck_draw = True
+
         self.hand.extend(drawn)
         return drawn
 
@@ -203,3 +207,18 @@ class GameState:
         self.current_turn_phase = "BEGINNING"
         self.current_step = "UNTAP"
         self.priority_player = self.active_player
+
+    def reset_game_state(self):
+        """"
+        Wipes out game state to prepare for a new game but retain socket connections.
+        Moves back to LOBBY phase
+        """
+        self.phase = "LOBBY"
+        self.players = {}
+        self.stack = []
+        self.current_step = None
+        self.priority_player = None
+        self.active_player = None
+        self.turn_number = 0
+        self.passes_in_a_row = 0
+
