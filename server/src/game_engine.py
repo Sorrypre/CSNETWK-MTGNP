@@ -218,8 +218,28 @@ class GameEngine:
             logging.warning(f"[ENGINE ERROR] Player {player_id} attempted to cast a spell without priority.")
             return error_pdu
 
-        # TODO: check dito the cost in spell_pdu matches the data from cards.json to avoid exploiting
-        
+        # Verify mana cost ng PDU via dun sa catalog to see if matching
+        # Kase kung hindi ibig sabihin may mali smwr
+        base_card_id = spell_pdu.card_id
+        if '_' in base_card_id:
+            base_card_id = base_card_id.rsplit("_", 1)[0]
+        card_in_question = game_state.catalog.get(base_card_id)
+        if not card_in_question:
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="UNKNOWN_CARD",
+                message=f"'{base_card_id}' is not found in the card catalog."
+            )
+        cmc = card_in_question.get("cmc", 0)
+        total_mana = sum(spell_pdu.mana_payment.values())
+        if total_mana < cmc:
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="INSUFFICIENT_MANA",
+                message=f"Spell needs {cmc} mana according to the card catalog, but PDU says {total_mana}."
+            )
         player = game_state.players[player_id]
         if not player.pay_mana(spell_pdu.mana_payment):
             return Error(
