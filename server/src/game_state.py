@@ -22,22 +22,35 @@ class CardInstance:
     This also has runtime attributes for a dynamic state
     """
     def __init__(self, instance_id: str, catalog: Dict[str, Any]):
-        self.id: str = instance_id #instance ID 
+        self.id: str = instance_id 
         self.base_id: str = extract_base_id(instance_id)
 
         # Static template rules from the pre-loaded catalog
         meta = catalog.get(self.base_id, {})
-        self.name: str = meta.get("name", "Unknown") # gets the name attribute and returns 'Unknown if null
+        self.name: str = meta.get("name", "Unknown")
         self.card_type: str = meta.get("type", "")
         self.base_power: Optional[int] = meta.get("power")
         self.base_toughness: Optional[int] = meta.get("toughness")
+        self.effect: str = meta.get("effect", "")
+
+        # Parse keywords directly from the effect description text
+        effect_lower = self.effect.lower()
+        self.first_strike: bool = "first strike" in effect_lower
+        self.double_strike: bool = "double strike" in effect_lower
+        self.haste: bool = "haste" in effect_lower
+        self.flying: bool = "flying" in effect_lower
 
         # Runtime Attributes
         self.tapped: bool = False
         self.damage: int = 0
         self.power: Optional[int] = self.base_power
         self.toughness: Optional[int] = self.base_toughness
-        self.summoning_sick: bool = True if "Creature" in self.card_type else False
+        
+        # Bypass summoning sickness if creature has Haste
+        if "Creature" in self.card_type:
+            self.summoning_sick: bool = not self.haste
+        else:
+            self.summoning_sick: bool = False
 
     def to_pdu_dict(self) -> Dict[str, Any]:
         """
