@@ -1,7 +1,7 @@
 from pydantic import ValidationError
 from schemas import *
 from framer import send_framed_message
-from game_state import PlayerState
+from game_state import PlayerState, GameState
 
 def send_error_response(conn, seq_num: int, code: str, message: str, rejected_action=None):
     err_pdu = Error(
@@ -59,7 +59,7 @@ def broadcast_game_state(game_state):
             send_framed_message(conn, payload)
         except Exception: pass
 
-def handle_player_ready(conn, payload: dict, game_state) -> bool:
+def handle_player_ready(conn, payload: dict, game_state: GameState) -> bool:
     """
     Validates registration and deck limits. 
     Returns True if game setup is triggered.
@@ -108,7 +108,7 @@ def handle_player_ready(conn, payload: dict, game_state) -> bool:
         )
 
     # Register player and socket
-    new_player = PlayerState(pdu.player_id, pdu.deck_list)
+    new_player = PlayerState(pdu.player_id, pdu.deck_list, game_state.catalog)
     game_state.players[pdu.player_id] = new_player
     game_state.socket_to_player[conn] = pdu.player_id
     game_state.player_sockets[pdu.player_id] = conn
