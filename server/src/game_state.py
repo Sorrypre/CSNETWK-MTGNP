@@ -101,17 +101,20 @@ class PlayerState:
                 logging.info(f'Player {self.player_id} discarded card {card_id}.')
 
     def pay_mana(self, mana_payment: Dict[str, int]):
-        land_taps = []
-        for land_id, mana_cost in mana_payment.items():
-            untapped_lands = []
-            for card in self.battlefield:
-                if card['card_id'] == land_id and not card.get('tapped', False):
-                    untapped_lands.append(card)
-            if len(untapped_lands) < mana_cost:
+        """
+        Validates and taps lands matching the provided mana_payment dictionary:
+        e.g., {"forest_001": 1, "forest_002": 1}
+        """
+        lands_to_tap = []
+        for land_id, cost in mana_payment.items():
+            card = self.get_battlefield_card(land_id)
+            if not card or card.tapped or "Land" not in card.card_type:
                 return False
-            land_taps.extend(untapped_lands[:mana_cost])
-        for land in land_taps:
-            land['tapped'] = True
+            lands_to_tap.append(card)
+
+        # Tap verified lands
+        for land in lands_to_tap:
+            land.tapped = True
         return True
 
     def reset_hand_to_library(self):
@@ -155,6 +158,7 @@ class GameState:
         self.player_sockets: Dict[str, Any] = {}
         self.active_player: Optional[str] = None
         self.seq_num: int = 1
+        self.expected_seq_num: int = 1 # Tracks active priority sequence token
         self.pending_triggers: Dict[str, List[Dict[str, Any]]] = {}
 
         self.attackers: List[str] = [] # List of attacking card instance_ids
