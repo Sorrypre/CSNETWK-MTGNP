@@ -142,12 +142,10 @@ class GameEngine:
             has_double_strike = getattr(attacker, 'double_strike', False)
 
             # In First Strike step: Skip creatures without First/Double Strike
-            if is_first_strike and not (has_first_strike or has_double_strike):
-                continue
-
-            # In Regular Combat Damage step: Skip creatures that ONLY have First Strike
-            if not is_first_strike and has_first_strike and not has_double_strike:
-                continue
+            attacker_should_deal_damage = (
+                (is_first_strike and (has_first_strike or has_double_strike)) or
+                (not is_first_strike and (has_double_strike or not has_first_strike))
+            )
 
             # Get ordered blockers for this attacker
             assigned_blocker_ids = game_state.damage_orders.get(
@@ -157,50 +155,47 @@ class GameEngine:
 
             if not assigned_blocker_ids:
                 # Unblocked: Damage dealt directly to player
-                damage = attacker.power or 0
-                defending_state.life -= damage
-                damage_events.append({
-                    "source_id": attacker_id,
-                    "target_id": defending_player_id,
-                    "damage": damage,
-                    "is_player": True
-                })
+                if attacker_should_deal_damage:
+                    damage = attacker.power or 0
+                    defending_state.life -= damage
+                    damage_events.append({
+                        "source": attacker_id,
+                        "target": defending_player_id,
+                        "amount": damage
+                    })
             else:
-               # Blocked: Process combat damage across ordered blockers
-                remaining_power = max(0, attacker.power or 0)
-                
-                for idx, b_id in enumerate(assigned_blocker_ids):
+                # Blocked: Process combat damage across ordered blockers
+                if attacker_should_deal_damage:
+                    remaining_power = max(0, attacker.power or 0)
+                    
+                    for idx, b_id in enumerate(assigned_blocker_ids):
+                        blocker = defending_state.get_battlefield_card(b_id)
+                        if not blocker:
+                            continue
+
+                        needed_lethal = max(0, blocker.toughness - blocker.damage)
+                        is_last_blocker = (idx == len(assigned_blocker_ids) - 1)
+                        # Ensure damage is non-negative
+                        dmg_to_blocker = remaining_power if is_last_blocker else min(remaining_power, needed_lethal)
+                        dmg_to_blocker = max(0, dmg_to_blocker)
+
+                        blocker.damage += dmg_to_blocker
+                        remaining_power = max(0, remaining_power - dmg_to_blocker)
+                        # ito yung updated na format based sa specs
+                        damage_events.append({
+                            "source": attacker_id,
+                            "target": b_id,
+                            "amount": dmg_to_blocker
+                        })
+
+                for b_id in assigned_blocker_ids:
                     blocker = defending_state.get_battlefield_card(b_id)
                     if not blocker:
                         continue
 
                     blocker_has_fs = getattr(blocker, 'first_strike', False)
                     blocker_has_ds = getattr(blocker, 'double_strike', False)
-                    
-                    # Clamp remaining required toughness to 0 so it never goes negative
-                    needed_lethal = max(0, blocker.toughness - blocker.damage)
-                    
-                    # If it's the last blocker, assign all remaining power; otherwise assign up to lethal
-                    is_last_blocker = (idx == len(assigned_blocker_ids) - 1)
-                    if is_last_blocker:
-                        dmg_to_blocker = remaining_power
-                    else:
-                        dmg_to_blocker = min(remaining_power, needed_lethal)
 
-                    # Ensure damage is non-negative
-                    dmg_to_blocker = max(0, dmg_to_blocker)
-
-                    blocker.damage += dmg_to_blocker
-                    remaining_power = max(0, remaining_power - dmg_to_blocker)
-
-                    damage_events.append({
-                        "source_id": attacker_id,
-                        "target_id": b_id,
-                        "damage": dmg_to_blocker,
-                        "is_player": False
-                    })
-
-                    # Blocker deals damage back only during its valid strike step
                     blocker_should_deal_damage = (
                         (is_first_strike and (blocker_has_fs or blocker_has_ds)) or
                         (not is_first_strike and (blocker_has_ds or not blocker_has_fs))
@@ -210,12 +205,10 @@ class GameEngine:
                         blocker_dmg = blocker.power or 0
                         attacker.damage += blocker_dmg
                         damage_events.append({
-                            "source_id": b_id,
-                            "target_id": attacker_id,
-                            "damage": blocker_dmg,
-                            "is_player": False
+                            "source": b_id,
+                            "target": attacker_id,
+                            "amount": blocker_dmg
                         })
-
         # Process lethal damage / creature deaths
         destroyed_cards = self.check_and_reap_dead_creatures(game_state)
 
@@ -223,7 +216,8 @@ class GameEngine:
             type=PDUType.COMBAT_DAMAGE_RESULT,
             seq_num=game_state.get_next_seq_num(),
             damage_events=damage_events,
-            destroyed_cards=destroyed_cards
+            life_totals={p_id: p.life for p_id, p in game_state.players.items()},
+            creatures_died=destroyed_cards
         )
 
     def requires_damage_ordering(self, game_state: GameState) -> bool:
@@ -259,9 +253,6 @@ class GameEngine:
         return False
     
     def advance_phase(self, game_state: GameState) -> List[BaseModel]:
-        """
-        Advances the game phase to the next phase in the cycle with combat sub-state processing.
-        """
         phase_order = [
             InGamePhase.UNTAP, InGamePhase.UPKEEP, InGamePhase.DRAW,
             InGamePhase.PRE_COMBAT_MAIN, InGamePhase.BEGIN_COMBAT,
@@ -309,7 +300,18 @@ class GameEngine:
 
         pdu_list: List[BaseModel] = [transition_pdu]
 
-        if next_step == InGamePhase.FIRST_STRIKE_DAMAGE:
+        if next_step == InGamePhase.ASSIGN_DAMAGE_ORDER:
+            for a_id in game_state.attackers:
+                blockers_for_a = [b_id for b_id, target_a in game_state.blockers.items() if target_a == a_id]
+                if len(blockers_for_a) > 1:
+                    pdu_list.append(AssignDamageOrder(
+                        type=PDUType.ASSIGN_DAMAGE_ORDER,
+                        seq_num=game_state.get_next_seq_num(),
+                        attacker_id=a_id,
+                        blocker_order=blockers_for_a
+                    ))
+
+        elif next_step == InGamePhase.FIRST_STRIKE_DAMAGE:
             damage_result_pdu = self.resolve_combat_damage(game_state, is_first_strike=True)
             pdu_list.append(damage_result_pdu)
 
@@ -317,7 +319,7 @@ class GameEngine:
             damage_result_pdu = self.resolve_combat_damage(game_state, is_first_strike=False)
             pdu_list.append(damage_result_pdu)
 
-        elif next_step == InGamePhase.END_OF_COMBAT:
+        elif next_step == InGamePhase.POST_COMBAT_MAIN:
             game_state.reset_combat_state()
 
         # --- PRIORITY & SBA PROCESSING ---
@@ -340,7 +342,7 @@ class GameEngine:
                 return pdu_list + next_pdus
         else:
             game_state.priority_player = game_state.active_player
-            
+
             # Assign and track the expected sequence number 
             grant_seq = game_state.get_next_seq_num()
             game_state.expected_seq_num = grant_seq
@@ -761,19 +763,18 @@ class GameEngine:
             )
 
         active_player_state = game_state.players[player_id]
-        declared_ids = attackers_pdu.attacker_ids
+        declared_ids = [a.creature_id for a in attackers_pdu.attackers]
 
         # If no attackers declared, skip combat steps directly to POSTCOMBAT_MAIN
         if not declared_ids:
-            logging.info("No attackers declared. Skipping remaining combat steps.")
-            game_state.reset_combat_state()
-            game_state.current_step = InGamePhase.POST_COMBAT_MAIN
+            logging.info("No attackers declared. Skipping directly to END_OF_COMBAT.")
+            game_state.current_step = InGamePhase.END_OF_COMBAT
             
             transition_pdu = PhaseTransition(
                 type=PDUType.PHASE_TRANSITION,
                 seq_num=game_state.get_next_seq_num(),
                 from_phase=InGamePhase.DECLARE_ATTACKERS,
-                to_phase=InGamePhase.POST_COMBAT_MAIN,
+                to_phase=InGamePhase.END_OF_COMBAT,
                 active_player=game_state.active_player,
                 turn=game_state.turn_number
             )
@@ -784,7 +785,7 @@ class GameEngine:
                 time_limit_ms=60000
             )
             return [transition_pdu, grant_pdu]
-
+        
         # Validate each declared attacker
         for card_id in declared_ids:
             card = active_player_state.get_battlefield_card(card_id)
@@ -836,7 +837,7 @@ class GameEngine:
             )
 
         defending_player_state = game_state.players[player_id]
-        blocks = blockers_pdu.blocks  # Dict: {blocker_id: attacker_id}
+        blocks = {b.creature_id: b.blocking_id for b in blockers_pdu.blockers}
 
         for blocker_id, attacker_id in blocks.items():
             blocker = defending_player_state.get_battlefield_card(blocker_id)
@@ -883,7 +884,7 @@ class GameEngine:
             )
 
         attacker_id = pdu.attacker_id
-        ordered_blocker_ids = pdu.blocker_ids
+        ordered_blocker_ids = pdu.blocker_order
 
         # Validate that the attacker was declared
         if attacker_id not in game_state.attackers:
@@ -905,10 +906,18 @@ class GameEngine:
                 code="ILLEGAL_ACTION",
                 message="Ordered blockers list does not match declared blockers for this attacker."
             )
-
+        
         # Store damage assignment order
         game_state.damage_orders[attacker_id] = ordered_blocker_ids
         game_state.passes_in_a_row = 0
+
+        multi_blocked_ids = [
+            a_id for a_id in game_state.attackers
+            if sum(1 for target_a in game_state.blockers.values() if target_a == a_id) > 1
+        ]
+
+        if all(a_id in game_state.damage_orders for a_id in multi_blocked_ids):
+            return self.advance_phase(game_state)
 
         grant_pdu = PriorityGrant(
             type=PDUType.PRIORITY_GRANT,

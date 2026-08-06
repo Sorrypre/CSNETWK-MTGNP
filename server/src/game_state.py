@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Any
 
 # Resolve project root: server/src/ -> server/ -> CSNETWK-MTGNP/
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-DEFAULT_CATALOG_PATH = os.path.join(BASE_DIR, "shared", "data", "cards_catalog.json")
+DEFAULT_CATALOG_PATH = os.path.join(BASE_DIR, "shared", "cards_catalog.json")
 
 def extract_base_id(instance_id: str) -> str:
     """
