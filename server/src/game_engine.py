@@ -300,18 +300,7 @@ class GameEngine:
 
         pdu_list: List[BaseModel] = [transition_pdu]
 
-        if next_step == InGamePhase.ASSIGN_DAMAGE_ORDER:
-            for a_id in game_state.attackers:
-                blockers_for_a = [b_id for b_id, target_a in game_state.blockers.items() if target_a == a_id]
-                if len(blockers_for_a) > 1:
-                    pdu_list.append(AssignDamageOrder(
-                        type=PDUType.ASSIGN_DAMAGE_ORDER,
-                        seq_num=game_state.get_next_seq_num(),
-                        attacker_id=a_id,
-                        blocker_order=blockers_for_a
-                    ))
-
-        elif next_step == InGamePhase.FIRST_STRIKE_DAMAGE:
+        if next_step == InGamePhase.FIRST_STRIKE_DAMAGE:
             damage_result_pdu = self.resolve_combat_damage(game_state, is_first_strike=True)
             pdu_list.append(damage_result_pdu)
 
@@ -906,7 +895,7 @@ class GameEngine:
                 code="ILLEGAL_ACTION",
                 message="Ordered blockers list does not match declared blockers for this attacker."
             )
-        
+
         # Store damage assignment order
         game_state.damage_orders[attacker_id] = ordered_blocker_ids
         game_state.passes_in_a_row = 0
@@ -916,13 +905,20 @@ class GameEngine:
             if sum(1 for target_a in game_state.blockers.values() if target_a == a_id) > 1
         ]
 
+        # Check if we have received an order for every multi-blocked attacker
         if all(a_id in game_state.damage_orders for a_id in multi_blocked_ids):
-            return self.advance_phase(game_state)
+            # All orders received! Advance the sequence token and open the final priority window
+            grant_seq = game_state.get_next_seq_num()
+            game_state.expected_seq_num = grant_seq
+            
+            grant_pdu = PriorityGrant(
+                type=PDUType.PRIORITY_GRANT,
+                seq_num=grant_seq,
+                player_id=player_id,
+                time_limit_ms=60000
+            )
+            return [grant_pdu]
 
-        grant_pdu = PriorityGrant(
-            type=PDUType.PRIORITY_GRANT,
-            seq_num=game_state.get_next_seq_num(),
-            player_id=player_id,
-            time_limit_ms=60000
-        )
-        return [grant_pdu]
+        # Still waiting on more orders. 
+        # Return an empty list so the sequence token does not increment
+        return []
