@@ -455,7 +455,7 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="UNKNOWN_CARD",
+                code="ILLEGAL_ACTION",
                 message=f"'{base_card_id}' is not found in the card catalog."
             )
         cmc = card_in_question.get("cmc", 0)
@@ -629,7 +629,7 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="NOT_YOUR_TURN",
+                code="ILLEGAL_ACTION",
                 message="Land can only be played during your turn or when you have priority.",
                 rejected_action=land_pdu.model_dump()
             )
@@ -646,7 +646,7 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="LAND_LIMIT_REACHED",
+                code="ILLEGAL_ACTION",
                 message="Land already played for this turn.",
                 rejected_action=land_pdu.model_dump()
             )
@@ -654,7 +654,7 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="LAND_NOT_IN_HAND",
+                code="ILLEGAL_ACTION",
                 message=f"{land_pdu.card_id} is not in player {player_id}'s hand.",
                 rejected_action=land_pdu.model_dump()
             )
@@ -689,7 +689,7 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="NO_TRIGGER",
+                code="TRIGGER_ORDER_INVALID",
                 message=f"Player {player_id}'s trigger stack is empty."
             )
         pending_ids = [ trigger["trigger_id"] for trigger in pending ]
@@ -697,7 +697,7 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="INVALID_TRIGGER",
+                code="TRIGGER_ORDER_INVALID",
                 message="Trigger IDs mismatch the current pending stack."
             )
         pdu_list: List[StackPush | PriorityGrant] = []
@@ -760,7 +760,7 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="NOT_YOUR_TURN",
+                code="ILLEGAL_ACTION",
                 message="Only the active player can discard through this discard type."
             )
         player = game_state.players[player_id]
@@ -769,14 +769,14 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="NO_CLEANUP_DISCARD",
+                code="ILLEGAL_ACTION",
                 message="Cleanup discards only happen when there are more than 7 cards in a player's hand."
             )
         if len(discard_pdu.card_ids) != hand_diff:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="DISCARD_COUNT_MISMATCH",
+                code="ILLEGAL_ACTION",
                 message=f"{hand_diff} card{'s' if hand_diff > 1 else ''} must be discarded by player {player_id}."
             )
         for card_id in discard_pdu.card_ids:
@@ -784,7 +784,7 @@ class GameEngine:
                 return Error(
                     type=PDUType.ERROR,
                     seq_num=game_state.get_next_seq_num(),
-                    code="DISCARD_NON_EXISTENT",
+                    code="ILLEGAL_ACTION",
                     message=f"{card_id} was not found in player {player_id}'s hand during execution."
                 )
         player.raw_discard(discard_pdu.card_ids)
@@ -805,7 +805,7 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="NOT_YOUR_TURN",
+                code="ILLEGAL_ACTION",
                 message="Only the active player can declare attackers."
             )
 
@@ -850,7 +850,7 @@ class GameEngine:
                 return Error(
                     type=PDUType.ERROR,
                     seq_num=game_state.get_next_seq_num(),
-                    code="INVALID_TARGET",
+                    code="ILLEGAL_TARGET",
                     message=f"Creature {card_id} is not on the battlefield."
                 )
             if card.tapped or card.summoning_sick:
@@ -898,7 +898,7 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="NOT_YOUR_TURN",
+                code="ILLEGAL_ACTION",
                 message="Only the defending player can declare blockers."
             )
 
@@ -918,7 +918,7 @@ class GameEngine:
                 return Error(
                     type=PDUType.ERROR,
                     seq_num=game_state.get_next_seq_num(),
-                    code="INVALID_TARGET",
+                    code="ILLEGAL_TARGET",
                     message=f"Attacker {attacker_id} was not declared as an attacker."
                 )
 
@@ -954,7 +954,7 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="NOT_YOUR_TURN",
+                code="ILLEGAL_ACTION",
                 message="Only the active player can assign damage order."
             )
 
@@ -966,7 +966,7 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="INVALID_TARGET",
+                code="ILLEGAL_TARGET",
                 message=f"Attacker {attacker_id} does not exist in combat."
             )
 

@@ -18,46 +18,34 @@ def broadcast_game_state(game_state):
     Utility to broadcast GAME_STATE_UPDATE to all registered 
     player connections when a game state changes.
     """
-
-    state_payload = {
-        "phase": "LOBBY",
-        "players_ready": len(game_state.players),
-        "waiting_for": ["WAITING_FOR_PLAYERS"] if len(game_state.players) < 2 else []
-    } if game_state == "LOBBY" else {
-        "phase": game_state.phase,
-            "turn_number": game_state.turn_number,
-            "turn_phase": game_state.current_turn_phase,
-            "turn_step": game_state.current_step,
-            "active_player": game_state.active_player,
-            "priority_player": game_state.priority_player,
-            "stack": game_state.stack,
-            "players": {
-                p_id: {
-                    "life": p.life,
-                    "hand_size": len(p.hand),
-                    "library_size": len(p.library),
-                    "graveyard": p.graveyard,
-                    "exile": p.exile,
-                    "battlefield": [card.to_pdu_dict() for card in p.battlefield],
-                    "has_kept": p.has_kept_hand
-                } for p_id, p in game_state.players.items()
+    if game_state.phase == "LOBBY":
+        state_payload = {
+            "phase": "LOBBY",
+            "players_ready": len(game_state.players),
+            "waiting_for": ["WAITING_FOR_PLAYERS"] if len(game_state.players) < 2 else []
         }
-    }
-    pdu = GameStateUpdate(
-        type=PDUType.GAME_STATE_UPDATE,
-        seq_num=game_state.get_next_seq_num(),
-        # if LOBBY, use default states
-        # if MULLIGAN or IN_GAME, use p_id dict, containing
-        # game summary of players
-        state=state_payload
-    )
-    payload = pdu.model_dump_json().encode('utf-8')
-
-    # Sends to all clients (all sockets)
-    for conn in list(game_state.player_sockets.values()):
-        try: 
-            send_framed_message(conn, payload)
-        except Exception: pass
+        pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=state_payload
+        )
+        payload = pdu.model_dump_json().encode('utf-8')
+        for conn in list(game_state.player_sockets.values()):
+            try:
+                send_framed_message(conn, payload)
+            except Exception: pass
+    else:
+        #Personalized state generator
+        seq_num = game_state.get_next_seq_num()
+        for p_id, conn in game_state.player_sockets.items():
+            pdu = GameStateUpdate(
+                type=PDUType.GAME_STATE_UPDATE,
+                seq_num=seq_num,
+                state=game_state.to_in_game_state(viewer_id=p_id)
+            )
+            try:
+                send_framed_message(conn, pdu.model_dump_json().encode('utf-8'))
+            except Exception: pass
 
 def handle_player_ready(conn, payload: dict, game_state: GameState) -> bool:
     """
@@ -72,7 +60,7 @@ def handle_player_ready(conn, payload: dict, game_state: GameState) -> bool:
         return send_error_response(
             conn, 
             seq_num, 
-            "ALREADY_REGISTERED", 
+            "ILLEGAL_ACTION",
             "Client socket already registered.", 
             payload
         )
@@ -92,7 +80,7 @@ def handle_player_ready(conn, payload: dict, game_state: GameState) -> bool:
         return send_error_response(
             conn, 
             payload.get("seq_num", 0), 
-            "INVALID_PDU", 
+            "ILLEGAL_ACTION",
             str(ve), 
             rejected_action=payload
         )
@@ -146,7 +134,7 @@ def handle_mulligan_choice(conn, payload: dict, game_state):
         return send_error_response(
             conn, 
             seq_num, 
-            "INVALID_PDU", 
+            "ILLEGAL_ACTION",
             str(ve), 
             rejected_action=payload
         )
@@ -168,7 +156,7 @@ def handle_mulligan_choice(conn, payload: dict, game_state):
             return send_error_response(
                 conn, 
                 pdu.seq_num, 
-                "INVALID_MULLIGAN_BOTTOM",
+                "ILLEGAL_ACTION",
                 f"Expected {player.mulligan_count} cards to bottom, got {len(pdu.cards_to_bottom)}",
                 rejected_action=payload
             )
@@ -186,7 +174,7 @@ def handle_mulligan_choice(conn, payload: dict, game_state):
             return send_error_response(
                 conn, 
                 pdu.seq_num, 
-                "INVALID_MULLIGAN_BOTTOM", 
+                "ILLEGAL_ACTION",
                 "cards_to_bottom must be empty when mulliganing.", 
                 payload
             )

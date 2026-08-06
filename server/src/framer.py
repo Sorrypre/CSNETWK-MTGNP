@@ -47,4 +47,7 @@ def send_framed_message(sock: socket.socket, payload_bytes: bytes) -> None:
     """
     if len(payload_bytes) > MAX_PAYLOAD_SIZE:
         raise ValueError(f"Payload exceeds limit of {MAX_PAYLOAD_SIZE} bytes")
-    sock.sendall(struct.pack(HEADER_FORMAT, len(payload_bytes)) + payload_bytes)
+    try:
+        sock.sendall(struct.pack(HEADER_FORMAT, len(payload_bytes)) + payload_bytes)
+    except (BrokenPipeError, ConnectionResetError):
+        pass

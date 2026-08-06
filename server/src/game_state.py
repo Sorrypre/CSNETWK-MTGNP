@@ -119,11 +119,25 @@ class PlayerState:
         e.g., {"forest_001": 1, "forest_002": 1}
         """
         lands_to_tap = []
-        for land_id, cost in mana_payment.items():
-            card = self.get_battlefield_card(land_id)
-            if not card or card.tapped or "Land" not in card.card_type:
-                return False
-            lands_to_tap.append(card)
+        available_lands = [c for c in self.battlefield if "Land" in c.card_type and not c.tapped]
+
+
+        for color, amount in mana_payment.items():
+            if amount <= 0: continue
+
+            found = 0
+            for land in available_lands:
+                if land in lands_to_tap:
+                    continue
+                land_meta = self.catalog.get(land.base_id, {})
+                #Check match for color in land_meta.get("color", []):
+                if land_meta.get("color") == color or color in ["Generic", "X"]:
+                    lands_to_tap.append(land)
+                    found += 1
+                    if found == amount:
+                        break
+            if found < amount:
+                return False  # Not enough lands to pay the mana cost
 
         # Tap verified lands
         for land in lands_to_tap:
@@ -172,7 +186,6 @@ class GameState:
         self.active_player: Optional[str] = None
         self.seq_num: int = 1
         self.expected_seq_num: int = 1 # Tracks active priority sequence token
-        self.pending_triggers: Dict[str, List[Dict[str, Any]]] = {}
 
         self.attackers: List[str] = [] # List of attacking card instance_ids
         self.blockers: Dict[str, str] = {} # Maps blocker_instance_id -> attacker_instance_id
@@ -238,8 +251,10 @@ class GameState:
         """
         self.phase = "LOBBY"
         self.players = {}
+        self.socket_to_player = {}
+        self.player_sockets = {}
         self.stack = []
-        self.current_step = None
+        self.current_step = "UNTAP"
         self.priority_player = None
         self.active_player = None
         self.turn_number = 0

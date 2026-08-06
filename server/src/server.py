@@ -57,7 +57,20 @@ def process_engine_result(result, conn):
                 send_framed_message(client_conn, payload_bytes)
 
             if pdu.type == PDUType.GAME_OVER:
-                game_state.phase = "FINISHED"
+                game_state.reset_game_state()
+                broadcast_game_state(game_state)
+
+        #PERSONLIZED GAME_STATE_UPDATE sends a unique view to each player
+        elif pdu.type == PDUType.GAME_STATE_UPDATE:
+            for p_id, client_conn in game_state.player_sockets.items():
+                #Masks the opponent's hand
+                personalized_state = game_state.to_in_game_state(viewer_id=p_id)
+
+                # Swap the generic state out for the personalized one
+                pdu.state = personalized_state
+
+                personalized_bytes = pdu.model_dump_json().encode('utf-8')
+                send_framed_message(client_conn, personalized_bytes)
 
         # PRIORITY_GRANT sends ONLY to the specific priority holder
         elif pdu.type == PDUType.PRIORITY_GRANT:
@@ -115,7 +128,7 @@ def receive(conn, addr):
                 send_error_response(conn, 0, "TIMEOUT", "Connection dropped due to 10s inactivity limit.")
                 break
             except ValueError as e:
-                send_error_response(conn, seq_num=0, code="PAYLOAD_TOO_LARGE", message=str(e))
+                send_error_response(conn, seq_num=0, code="INVALID_JSON", message=str(e))
                 break
             except ConnectionError:
                 break
@@ -154,7 +167,7 @@ def receive(conn, addr):
                             send_error_response(
                                 conn,
                                 seq_num,
-                                "MALFORMED_PING",
+                                "ILLEGAL_ACTION",
                                 str(ve))
 
                     case PDUType.PLAYER_READY:
@@ -183,7 +196,7 @@ def receive(conn, addr):
                         try:
                             attack_pdu = DeclareAttackers(**message)
                         except ValidationError as ve:
-                            send_error_response(conn, seq_num, "INVALID_PDU", str(ve))
+                            send_error_response(conn, seq_num, "ILLEGAL_ACTION", str(ve))
                             continue
                         
                         player_id = game_state.socket_to_player.get(conn)
@@ -197,7 +210,7 @@ def receive(conn, addr):
                         try:
                             block_pdu = DeclareBlockers(**message)
                         except ValidationError as ve:
-                            send_error_response(conn, seq_num, "INVALID_PDU", str(ve))
+                            send_error_response(conn, seq_num, "ILLEGAL_ACTION", str(ve))
                             continue
 
                         player_id = game_state.socket_to_player.get(conn)
@@ -211,7 +224,7 @@ def receive(conn, addr):
                         try:
                             damage_order_pdu = AssignDamageOrder(**message)
                         except ValidationError as ve:
-                            send_error_response(conn, seq_num, "INVALID_PDU", str(ve))
+                            send_error_response(conn, seq_num, "ILLEGAL_ACTION", str(ve))
                             continue
 
                         player_id = game_state.socket_to_player.get(conn)
@@ -227,7 +240,7 @@ def receive(conn, addr):
                         try:
                             spell_pdu = CastSpell(**message)
                         except ValidationError as ve:
-                            send_error_response(conn, seq_num, "INVALID_PDU", str(ve))
+                            send_error_response(conn, seq_num, "ILLEGAL_ACTION", str(ve))
                             continue
 
                         #Sent for processing
@@ -241,7 +254,7 @@ def receive(conn, addr):
                         try:
                             land_pdu = PlayLand(**message)
                         except ValidationError as ve:
-                            send_error_response(conn, seq_num, "INVALID_PDU", str(ve))
+                            send_error_response(conn, seq_num, "ILLEGAL_ACTION", str(ve))
                             continue
                         player_id = game_state.socket_to_player.get(conn)
                         result = game_engine.play_land(player_id, land_pdu, game_state)
@@ -254,7 +267,7 @@ def receive(conn, addr):
                         try:
                             discard_pdu = Discard(**message)
                         except ValidationError as ve:
-                            send_error_response(conn, seq_num, "INVALID_PDU", str(ve))
+                            send_error_response(conn, seq_num, "ILLEGAL_ACTION", str(ve))
                             continue
                         player_id = game_state.socket_to_player.get(conn)
                         result = game_engine.cleanup_discard(player_id, discard_pdu, game_state)
@@ -267,7 +280,7 @@ def receive(conn, addr):
                         try:
                             trigger_pdu = TriggerOrderResponse(**message)
                         except ValidationError as ve:
-                            send_error_response(conn, seq_num, "INVALID_PDU", str(ve))
+                            send_error_response(conn, seq_num, "ILLEGAL_ACTION", str(ve))
                             continue
                         player_id = game_state.socket_to_player.get(conn)
                         result = game_engine.trigger_order_response(player_id, trigger_pdu, game_state)
@@ -305,7 +318,7 @@ def receive(conn, addr):
                         send_error_response(
                             conn,
                             seq_num,
-                            "UNRECOGNIZED_PDU",
+                            "UNKNOWN_TYPE",
                             f"PDU '{msg_type}' unhandled.",
                             rejected_action=message)
 
@@ -334,6 +347,7 @@ def priority_timeout(timed_out_player_id: str):
             return
 
         logging.warning(f"[TIMEOUT] Player {timed_out_player_id} has failed to respond in time.")
+        priority_timer.pop(timed_out_player_id, None)
 
         players = list(game_state.players.keys())
         winner = players[1] if timed_out_player_id == players[0] else players[0]
@@ -379,7 +393,7 @@ def main():
                     send_error_response(
                         conn, 
                         seq_num=0, 
-                        code="SERVER_FULL", 
+                        code="ILLEGAL_ACTION",
                         message="Server active client limit reached"
                     )
                     conn.close()
