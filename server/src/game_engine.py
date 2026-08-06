@@ -72,14 +72,24 @@ class GameEngine:
             other_player = players[1] if game_state.priority_player == players[0] else players[0]
             game_state.priority_player = other_player
 
+            # game state update
+            state_update_pdu = GameStateUpdate(
+                type=PDUType.GAME_STATE_UPDATE,
+                seq_num=game_state.get_next_seq_num(),
+                state=game_state.to_in_game_state() # Uses the new mapping method
+            )
+
+            grant_seq = game_state.get_next_seq_num()
+            game_state.expected_seq_num = grant_seq  # Sync expected priority token
+
             grant_pdu = PriorityGrant(
                 type=PDUType.PRIORITY_GRANT,
-                seq_num=game_state.get_next_seq_num(),
+                seq_num=grant_seq,
                 player_id=game_state.priority_player,
                 time_limit_ms=60000
             )
             logging.debug(f"[ENGINE SEND] Priority swapped. Generated PDU: PRIORITY_GRANT for {game_state.priority_player}")
-            return [grant_pdu]
+            return [state_update_pdu, grant_pdu]
 
         # Both players passed in a row, resolve the stack or advance the phase
         else:
@@ -312,8 +322,15 @@ class GameEngine:
             game_state.reset_combat_state()
 
         # --- PRIORITY & SBA PROCESSING ---
+        state_update_pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=game_state.to_in_game_state() # Uses the new mapping method
+        )
+        
         if next_step == InGamePhase.UNTAP:
             game_state.priority_player = None
+            pdu_list.append(state_update_pdu)
             return pdu_list
         elif next_step == InGamePhase.CLEANUP:
             # Reset marked damage on all creatures during cleanup
@@ -325,6 +342,7 @@ class GameEngine:
             hand_diff = len(active_player.hand) - 7
             if hand_diff > 0:
                 logging.info(f'Player {active_player} needs to discard {hand_diff} card(s).')
+                pdu_list.append(state_update_pdu)
                 return pdu_list
             else:
                 next_pdus = self.advance_phase(game_state)
@@ -345,8 +363,9 @@ class GameEngine:
             
             sba_results = self.check_state_based_action(game_state)
             if sba_results:
-                return pdu_list + sba_results
+                return pdu_list + [state_update_pdu] + sba_results
             
+            pdu_list.append(state_update_pdu)
             pdu_list.append(grant_pdu)
             return pdu_list
         
@@ -384,21 +403,30 @@ class GameEngine:
         # After resolving, grant priority to the active player
         game_state.priority_player = game_state.active_player
 
+        state_update_pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=game_state.to_in_game_state() # Uses the new mapping method
+        )
+
+        grant_seq = game_state.get_next_seq_num()
+        game_state.expected_seq_num = grant_seq
+
         grant_pdu = PriorityGrant(
             type=PDUType.PRIORITY_GRANT,
-            seq_num=game_state.get_next_seq_num(),
+            seq_num=grant_seq,
             player_id=game_state.priority_player,
             time_limit_ms=60000
         )
 
         sba_results = self.check_state_based_action(game_state)
         if sba_results:
-            return sba_results
+            return [state_update_pdu] + sba_results
 
         logging.info(f"Stack item {resolved_item['stack_item_id']} resolved.")
         logging.debug(f"[ENGINE SEND] Stack item resolved. Generated PDUs: STACK_RESOLVE, PRIORITY_GRANT")
 
-        return [resolved_pdu, grant_pdu]
+        return [resolved_pdu, state_update_pdu, grant_pdu]
 
     def handle_cast_spell(self, player_id: str, spell_pdu: CastSpell, game_state: GameState) -> List[BaseModel] | Error:
         """
@@ -477,10 +505,19 @@ class GameEngine:
             controller=player_id
         )
 
+        state_update_pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=game_state.to_in_game_state()
+        )
+
+        grant_seq = game_state.get_next_seq_num()
+        game_state.expected_seq_num = grant_seq
+
         #Priority is re-granted to the player who cast the spell
         grant_pdu = PriorityGrant(
             type=PDUType.PRIORITY_GRANT,
-            seq_num=game_state.get_next_seq_num(),
+            seq_num=grant_seq,
             player_id=player_id,
             time_limit_ms=60000
         )
@@ -489,9 +526,9 @@ class GameEngine:
 
         if sba_results:
             # If the game is over, broadcast the push/resolve, then the game over.
-            return [push_pdu] + sba_results
+            return [push_pdu, state_update_pdu] + sba_results
 
-        return [push_pdu, grant_pdu]
+        return [push_pdu, state_update_pdu, grant_pdu]
 
     def is_target_valid(self, target_id: str, game_state: GameState) -> bool:
         """
@@ -628,13 +665,23 @@ class GameEngine:
         game_state.passes_in_a_row = 0
         logging.info(f'Player {player_id} plays land: {land_pdu.card_id}')
 
+        # game state update pdu
+        state_update_pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=game_state.to_in_game_state() # Uses the new mapping method
+        )
+
+        grant_seq = game_state.get_next_seq_num()
+        game_state.expected_seq_num = grant_seq  # Sync expected priority token
+        
         grant_pdu = PriorityGrant(
             type=PDUType.PRIORITY_GRANT,
-            seq_num=game_state.get_next_seq_num(),
+            seq_num=grant_seq,
             player_id=player_id,
             time_limit_ms=60000
         )
-        return [grant_pdu]
+        return [state_update_pdu, grant_pdu]
 
     def trigger_order_response(self, player_id: str, response_pdu: TriggerOrderResponse, game_state: GameState):
         pending = game_state.pending_triggers.get(player_id, [])
@@ -681,9 +728,20 @@ class GameEngine:
             ))
         game_state.pending_triggers[player_id] = []
         game_state.passes_in_a_row = 0
+
+        state_update_pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=game_state.to_in_game_state() # Uses the new mapping method
+        )
+        pdu_list.append(state_update_pdu)
+
+        grant_seq = game_state.get_next_seq_num()
+        game_state.expected_seq_num = grant_seq  # Sync expected priority token
+        
         grant_pdu = PriorityGrant(
             type=PDUType.PRIORITY_GRANT,
-            seq_num=game_state.get_next_seq_num(),
+            seq_num=grant_seq,
             player_id=game_state.active_player,
             time_limit_ms=60000
         )
@@ -767,13 +825,23 @@ class GameEngine:
                 active_player=game_state.active_player,
                 turn=game_state.turn_number
             )
+
+            state_update_pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=game_state.to_in_game_state() # Uses the new mapping method
+            )
+
+            grant_seq = game_state.get_next_seq_num()
+            game_state.expected_seq_num = grant_seq  # Sync expected priority token
+
             grant_pdu = PriorityGrant(
                 type=PDUType.PRIORITY_GRANT,
-                seq_num=game_state.get_next_seq_num(),
+                seq_num=grant_seq,
                 player_id=game_state.active_player,
                 time_limit_ms=60000
             )
-            return [transition_pdu, grant_pdu]
+            return [transition_pdu, state_update_pdu, grant_pdu]
         
         # Validate each declared attacker
         for card_id in declared_ids:
@@ -800,13 +868,22 @@ class GameEngine:
             game_state.attackers.append(card_id)
 
         game_state.passes_in_a_row = 0
+        state_update_pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=game_state.to_in_game_state() # Uses the new mapping method
+        )
+
+        grant_seq = game_state.get_next_seq_num()
+        game_state.expected_seq_num = grant_seq  # Sync expected priority token
+        
         grant_pdu = PriorityGrant(
             type=PDUType.PRIORITY_GRANT,
-            seq_num=game_state.get_next_seq_num(),
+            seq_num=grant_seq,
             player_id=player_id,
             time_limit_ms=60000
         )
-        return [grant_pdu]
+        return [state_update_pdu, grant_pdu]
 
 
     def handle_declare_blockers(self, player_id: str, blockers_pdu: DeclareBlockers, game_state: GameState) -> List[BaseModel] | Error:
@@ -848,13 +925,22 @@ class GameEngine:
         game_state.blockers = blocks
         game_state.passes_in_a_row = 0
 
+        state_update_pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=game_state.to_in_game_state() # Uses the new mapping method
+        )
+
+        grant_seq = game_state.get_next_seq_num()
+        game_state.expected_seq_num = grant_seq  # Sync expected priority token
+
         grant_pdu = PriorityGrant(
             type=PDUType.PRIORITY_GRANT,
-            seq_num=game_state.get_next_seq_num(),
+            seq_num=grant_seq,
             player_id=game_state.active_player,
             time_limit_ms=60000
         )
-        return [grant_pdu]
+        return [state_update_pdu, grant_pdu]
     
     def handle_assign_damage_order(self, player_id: str, pdu: AssignDamageOrder, game_state: GameState) -> List[BaseModel] | Error:
         if game_state.current_step != InGamePhase.ASSIGN_DAMAGE_ORDER:
@@ -908,17 +994,27 @@ class GameEngine:
         # Check if we have received an order for every multi-blocked attacker
         if all(a_id in game_state.damage_orders for a_id in multi_blocked_ids):
             # All orders received! Advance the sequence token and open the final priority window
+            state_update_pdu = GameStateUpdate(
+                type=PDUType.GAME_STATE_UPDATE,
+                seq_num=game_state.get_next_seq_num(),
+                state=game_state.to_in_game_state() # Uses the new mapping method
+            )
+
             grant_seq = game_state.get_next_seq_num()
             game_state.expected_seq_num = grant_seq
-            
+
             grant_pdu = PriorityGrant(
                 type=PDUType.PRIORITY_GRANT,
                 seq_num=grant_seq,
                 player_id=player_id,
                 time_limit_ms=60000
             )
-            return [grant_pdu]
+            return [state_update_pdu, grant_pdu]
 
-        # Still waiting on more orders. 
-        # Return an empty list so the sequence token does not increment
-        return []
+        # Still waiting on more orders.
+        state_update_pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=game_state.to_in_game_state() # Uses the new mapping method
+        )
+        return [state_update_pdu]

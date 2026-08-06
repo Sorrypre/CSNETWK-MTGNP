@@ -38,7 +38,7 @@ def broadcast_game_state(game_state):
                     "library_size": len(p.library),
                     "graveyard": p.graveyard,
                     "exile": p.exile,
-                    "battlefield": p.battlefield,
+                    "battlefield": [card.to_pdu_dict() for card in p.battlefield],
                     "has_kept": p.has_kept_hand
                 } for p_id, p in game_state.players.items()
         }

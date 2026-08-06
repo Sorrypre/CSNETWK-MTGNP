@@ -254,3 +254,44 @@ class GameState:
         self.blockers.clear()
         self.damage_orders.clear()
 
+    def to_in_game_state(self, viewer_id: str = None) -> dict:
+        """
+        Serializes the game state to match the RFC v1.0 GAME_STATE_UPDATE schema.
+        If viewer_id is provided, it masks the opponent's hand.
+        """
+        # Determine if the active player has played a land
+        land_played = False
+        if self.active_player and self.active_player in self.players:
+            land_played = self.players[self.active_player].lands_played_this_turn > 0
+
+        # Construct basic state properties
+        state_dict = {
+            "turn": self.turn_number,
+            "active_player": self.active_player,
+            "phase": self.current_step,
+            "priority_holder": self.priority_player,
+            "life_totals": {p_id: p.life for p_id, p in self.players.items()},
+            "stack": self.stack,
+            "battlefield": {p_id: [c.to_pdu_dict() for c in p.battlefield] for p_id, p in self.players.items()},
+            "graveyard": {p_id: p.graveyard for p_id, p in self.players.items()},
+            "library_counts": {p_id: len(p.library) for p_id, p in self.players.items()},
+            "land_played_this_turn": land_played,
+            "hand": {},
+            "hand_counts": {}
+        }
+
+        # Populate hands and hand counts based on who is viewing the state
+        for p_id, p in self.players.items():
+            if viewer_id is None or p_id == viewer_id:
+                # If no viewer specified (broadcasting all info) or viewing own hand
+                state_dict["hand"][p_id] = p.hand
+            else:
+                # Masking opponent's hand
+                state_dict["hand_counts"][p_id] = len(p.hand)
+                
+            # It's usually safe to include hand_counts for everyone just in case
+            if viewer_id is None:
+                 state_dict["hand_counts"][p_id] = len(p.hand)
+
+        return state_dict
+

@@ -41,8 +41,6 @@ def process_engine_result(result, conn):
     if not result:
         return
 
-    broadcast_game_state(game_state)
-
     for pdu in result:
         payload_bytes = pdu.model_dump_json().encode('utf-8')
 
@@ -52,7 +50,8 @@ def process_engine_result(result, conn):
             PDUType.STACK_RESOLVE, 
             PDUType.PHASE_TRANSITION, 
             PDUType.COMBAT_DAMAGE_RESULT,
-            PDUType.GAME_OVER
+            PDUType.GAME_OVER,
+            PDUType.GAME_STATE_UPDATE
         ]:
             for client_conn in game_state.player_sockets.values():
                 send_framed_message(client_conn, payload_bytes)
