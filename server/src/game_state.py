@@ -22,7 +22,7 @@ class CardInstance:
     This also has runtime attributes for a dynamic state
     """
     def __init__(self, instance_id: str, catalog: Dict[str, Any]):
-        self.id: str = instance_id 
+        self.id: str = instance_id
         self.base_id: str = extract_base_id(instance_id)
 
         # Static template rules from the pre-loaded catalog
@@ -45,7 +45,7 @@ class CardInstance:
         self.damage: int = 0
         self.power: Optional[int] = self.base_power
         self.toughness: Optional[int] = self.base_toughness
-        
+
         # Bypass summoning sickness if creature has Haste
         if "Creature" in self.card_type:
             self.summoning_sick: bool = not self.haste
@@ -121,8 +121,9 @@ class PlayerState:
         lands_to_tap = []
         available_lands = [c for c in self.battlefield if "Land" in c.card_type and not c.tapped]
 
+        sorted_costs = sorted(mana_payment.items(), key=lambda item: item[0] in ["Generic", "X"])
 
-        for color, amount in mana_payment.items():
+        for color, amount in sorted_costs:
             if amount <= 0: continue
 
             found = 0
@@ -162,7 +163,7 @@ class PlayerState:
         card_obj = CardInstance(instance_id, self.catalog)
         self.battlefield.append(card_obj)
         return card_obj
-    
+
     def get_battlefield_card(self, instance_id: str) -> Optional[CardInstance]:
         """
         Looks up a CardInstance on the battlefield by instance ID.
@@ -171,9 +172,10 @@ class PlayerState:
             if card.id == instance_id:
                 return card
         return None
+
 class GameState:
     """
-    Maintains the global game state including the current phase, 
+    Maintains the global game state including the current phase,
     socket and player mappings (client-server connections).
     """
 
@@ -186,6 +188,9 @@ class GameState:
         self.active_player: Optional[str] = None
         self.seq_num: int = 1
         self.expected_seq_num: int = 1 # Tracks active priority sequence token
+
+        # MULLIGAN tracking needs independent seq_num validation per player
+        self.mulligan_expected_seq_nums: Dict[str, int] = {}
 
         self.attackers: List[str] = [] # List of attacking card instance_ids
         self.blockers: Dict[str, str] = {} # Maps blocker_instance_id -> attacker_instance_id
@@ -207,9 +212,10 @@ class GameState:
                 return json.load(f)
         print(f"Warning: Catalog file not found at {catalog_path}")
         return {}
+
     def get_next_seq_num(self) -> int:
         """
-        Generates an incrementing sequence number for every 
+        Generates an incrementing sequence number for every
         message or state change issued by the server.
 
         Used to keep track of turn updates and grant requests.
@@ -221,7 +227,7 @@ class GameState:
 
     def initialize_game(self):
         """
-        Initializes life totals to 20, shuffles libraries, 
+        Initializes life totals to 20, shuffles libraries,
         draws 7 cards, and picks active player.
         """
         for p in self.players.values():
@@ -233,6 +239,8 @@ class GameState:
         self.active_player = random.choice(list(self.players.keys()))
         self.priority_player = self.active_player
         self.phase = "MULLIGAN"
+
+        self.current_step = "MULLIGAN"
 
     def is_all_mulligans_resolved(self) -> bool:
         return len(self.players) == 2 and all(p.has_kept_hand for p in self.players.values())
@@ -303,10 +311,9 @@ class GameState:
             else:
                 # Masking opponent's hand
                 state_dict["hand_counts"][p_id] = len(p.hand)
-                
+
             # It's usually safe to include hand_counts for everyone just in case
             if viewer_id is None:
-                 state_dict["hand_counts"][p_id] = len(p.hand)
+                state_dict["hand_counts"][p_id] = len(p.hand)
 
         return state_dict
-
