@@ -14,6 +14,8 @@ class InGamePhase(StrEnum):
     BEGIN_COMBAT = "BEGIN_COMBAT"
     DECLARE_ATTACKERS = "DECLARE_ATTACKERS"
     DECLARE_BLOCKERS = "DECLARE_BLOCKERS"
+    ASSIGN_DAMAGE_ORDER = "ASSIGN_DAMAGE_ORDER"
+    FIRST_STRIKE_DAMAGE = "FIRST_STRIKE_DAMAGE"  
     COMBAT_DAMAGE = "COMBAT_DAMAGE"
     END_OF_COMBAT = "END_OF_COMBAT"
     POST_COMBAT_MAIN = "POSTCOMBAT_MAIN"
@@ -29,25 +31,28 @@ class GameEngine:
         logging.debug(f"[ENGINE RECEIVE] Validating PDU Type: {pdu_type} with seq_num: {client_seq_num}")
 
         if pdu_type in [PDUType.PING, PDUType.CONCEDE, PDUType.PLAYER_READY, PDUType.MULLIGAN_CHOICE]:
-            return None # These actions are exempt from sequence number validation
+            return None
 
-        # Compare client with global game state
-        if client_seq_num != game_state.seq_num:
+        # Validate client sequence token against expected priority token
+        if client_seq_num != game_state.expected_seq_num:
             error_pdu = Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
                 code="STALE_ACTION",
-                message=f"Priority token mismatch. Expected {game_state.seq_num - 1}, got {client_seq_num}.",
+                message=f"Priority token mismatch. Expected {game_state.expected_seq_num}, got {client_seq_num}.",
                 rejected_action=None
             )
 
+            grant_seq = game_state.get_next_seq_num()
+            game_state.expected_seq_num = grant_seq
+
             grant_pdu = PriorityGrant(
                 type=PDUType.PRIORITY_GRANT,
-                seq_num=game_state.get_next_seq_num(),
+                seq_num=grant_seq,
                 player_id=game_state.priority_player,
                 time_limit_ms=60000
             )
-            logging.debug(f"[ENGINE SEND] Stale action detected. Generated PDUs: ERROR, PRIORITY_GRANT")
+            logging.debug("[ENGINE SEND] Stale action detected. Generated PDUs: ERROR, PRIORITY_GRANT")
             return error_pdu, grant_pdu
 
         return None
@@ -67,14 +72,24 @@ class GameEngine:
             other_player = players[1] if game_state.priority_player == players[0] else players[0]
             game_state.priority_player = other_player
 
+            # game state update
+            state_update_pdu = GameStateUpdate(
+                type=PDUType.GAME_STATE_UPDATE,
+                seq_num=game_state.get_next_seq_num(),
+                state=game_state.to_in_game_state() # Uses the new mapping method
+            )
+
+            grant_seq = game_state.get_next_seq_num()
+            game_state.expected_seq_num = grant_seq  # Sync expected priority token
+
             grant_pdu = PriorityGrant(
                 type=PDUType.PRIORITY_GRANT,
-                seq_num=game_state.get_next_seq_num(),
+                seq_num=grant_seq,
                 player_id=game_state.priority_player,
                 time_limit_ms=60000
             )
             logging.debug(f"[ENGINE SEND] Priority swapped. Generated PDU: PRIORITY_GRANT for {game_state.priority_player}")
-            return [grant_pdu]
+            return [state_update_pdu, grant_pdu]
 
         # Both players passed in a row, resolve the stack or advance the phase
         else:
@@ -86,14 +101,173 @@ class GameEngine:
                 logging.debug("[ENGINE STATE] Stack populated. Triggering stack resolution.")
                 return self.resolve_stack(game_state)
 
+    def check_and_reap_dead_creatures(self, game_state: GameState) -> List[str]:
+        """
+        Identifies creatures with lethal damage or zero/negative toughness,
+        removes them from the battlefield, moves them to the graveyard,
+        and returns a list of destroyed card IDs.
+        """
+        destroyed_cards: List[str] = []
+
+        for player_id, player_state in game_state.players.items():
+            surviving_battlefield = []
+
+            for perm in player_state.battlefield:
+                # Support both object attributes and dict key lookups
+                card_id = perm.id
+                toughness = perm.toughness
+                damage = perm.damage
+
+                # Check if creature has taken lethal damage or has 0 or less toughness
+                if toughness is not None and (toughness <= 0 or damage >= toughness):
+                    if card_id:
+                        destroyed_cards.append(card_id)
+                        player_state.graveyard.append(card_id)
+                        logging.info(f"Creature {card_id} destroyed by lethal damage/stats and moved to graveyard.")
+                else:
+                    surviving_battlefield.append(perm)
+
+            player_state.battlefield = surviving_battlefield
+
+        return destroyed_cards
+
+    def resolve_combat_damage(self, game_state: GameState, is_first_strike: bool = False) -> CombatDamageResult:
+        """
+        Evaluates damage, mutates state, and returns a CombatDamageResult PDU.
+        """
+        players = list(game_state.players.keys())
+        defending_player_id = players[1] if game_state.active_player == players[0] else players[0]
+
+        active_state = game_state.players[game_state.active_player]
+        defending_state = game_state.players[defending_player_id]
+
+        damage_events = []  # To be populated with damage detail objects for PDU
+
+        for attacker_id in game_state.attackers:
+            attacker = active_state.get_battlefield_card(attacker_id)
+            if not attacker:
+                continue
+
+            has_first_strike = getattr(attacker, 'first_strike', False)
+            has_double_strike = getattr(attacker, 'double_strike', False)
+
+            # In First Strike step: Skip creatures without First/Double Strike
+            attacker_should_deal_damage = (
+                (is_first_strike and (has_first_strike or has_double_strike)) or
+                (not is_first_strike and (has_double_strike or not has_first_strike))
+            )
+
+            # Get ordered blockers for this attacker
+            assigned_blocker_ids = game_state.damage_orders.get(
+                attacker_id,
+                [b_id for b_id, a_id in game_state.blockers.items() if a_id == attacker_id]
+            )
+
+            if not assigned_blocker_ids:
+                # Unblocked: Damage dealt directly to player
+                if attacker_should_deal_damage:
+                    damage = attacker.power or 0
+                    defending_state.life -= damage
+                    damage_events.append({
+                        "source": attacker_id,
+                        "target": defending_player_id,
+                        "amount": damage
+                    })
+            else:
+                # Blocked: Process combat damage across ordered blockers
+                if attacker_should_deal_damage:
+                    remaining_power = max(0, attacker.power or 0)
+                    
+                    for idx, b_id in enumerate(assigned_blocker_ids):
+                        blocker = defending_state.get_battlefield_card(b_id)
+                        if not blocker:
+                            continue
+
+                        needed_lethal = max(0, blocker.toughness - blocker.damage)
+                        is_last_blocker = (idx == len(assigned_blocker_ids) - 1)
+                        # Ensure damage is non-negative
+                        dmg_to_blocker = remaining_power if is_last_blocker else min(remaining_power, needed_lethal)
+                        dmg_to_blocker = max(0, dmg_to_blocker)
+
+                        blocker.damage += dmg_to_blocker
+                        remaining_power = max(0, remaining_power - dmg_to_blocker)
+                        # ito yung updated na format based sa specs
+                        damage_events.append({
+                            "source": attacker_id,
+                            "target": b_id,
+                            "amount": dmg_to_blocker
+                        })
+
+                for b_id in assigned_blocker_ids:
+                    blocker = defending_state.get_battlefield_card(b_id)
+                    if not blocker:
+                        continue
+
+                    blocker_has_fs = getattr(blocker, 'first_strike', False)
+                    blocker_has_ds = getattr(blocker, 'double_strike', False)
+
+                    blocker_should_deal_damage = (
+                        (is_first_strike and (blocker_has_fs or blocker_has_ds)) or
+                        (not is_first_strike and (blocker_has_ds or not blocker_has_fs))
+                    )
+
+                    if blocker_should_deal_damage:
+                        blocker_dmg = blocker.power or 0
+                        attacker.damage += blocker_dmg
+                        damage_events.append({
+                            "source": b_id,
+                            "target": attacker_id,
+                            "amount": blocker_dmg
+                        })
+        # Process lethal damage / creature deaths
+        destroyed_cards = self.check_and_reap_dead_creatures(game_state)
+
+        return CombatDamageResult(
+            type=PDUType.COMBAT_DAMAGE_RESULT,
+            seq_num=game_state.get_next_seq_num(),
+            damage_events=damage_events,
+            life_totals={p_id: p.life for p_id, p in game_state.players.items()},
+            creatures_died=destroyed_cards
+        )
+
+    def requires_damage_ordering(self, game_state: GameState) -> bool:
+        """
+        Returns True if any attacker is blocked by 2 or more creatures.
+        """
+        for attacker_id in game_state.attackers:
+            blocker_count = sum(1 for a_id in game_state.blockers.values() if a_id == attacker_id)
+            if blocker_count > 1:
+                return True
+        return False
+
+    def has_first_strike_creatures(self, game_state: GameState) -> bool:
+        """
+        Returns True if any active attacking or blocking creature has first or double strike.
+        """
+        active_player = game_state.players[game_state.active_player]
+        defending_id = [p for p in game_state.players if p != game_state.active_player][0]
+        defending_player = game_state.players[defending_id]
+
+        # Check attackers
+        for a_id in game_state.attackers:
+            card = active_player.get_battlefield_card(a_id)
+            if card and (getattr(card, 'first_strike', False) or getattr(card, 'double_strike', False)):
+                return True
+
+        # Check blockers
+        for b_id in game_state.blockers.keys():
+            card = defending_player.get_battlefield_card(b_id)
+            if card and (getattr(card, 'first_strike', False) or getattr(card, 'double_strike', False)):
+                return True
+
+        return False
+    
     def advance_phase(self, game_state: GameState) -> List[BaseModel]:
-        """
-        Advances the game phase to the next phase in the cycle
-        """
         phase_order = [
             InGamePhase.UNTAP, InGamePhase.UPKEEP, InGamePhase.DRAW,
             InGamePhase.PRE_COMBAT_MAIN, InGamePhase.BEGIN_COMBAT,
             InGamePhase.DECLARE_ATTACKERS, InGamePhase.DECLARE_BLOCKERS,
+            InGamePhase.ASSIGN_DAMAGE_ORDER, InGamePhase.FIRST_STRIKE_DAMAGE,
             InGamePhase.COMBAT_DAMAGE, InGamePhase.END_OF_COMBAT,
             InGamePhase.POST_COMBAT_MAIN, InGamePhase.END_STEP,
             InGamePhase.CLEANUP
@@ -101,15 +275,26 @@ class GameEngine:
 
         current_phase_index = phase_order.index(game_state.current_step)
 
-        #If on CLEANUP phase, advance turn and reset to UNTAP
+        # Loop to reset turn at CLEANUP
         if current_phase_index == len(phase_order) - 1:
             next_step = InGamePhase.UNTAP
             game_state.turn_number += 1
             players = list(game_state.players.keys())
-            game_state.active_player = players[1] if game_state.active_player == players[0] else players[0] #Switch active player
+            game_state.active_player = players[1] if game_state.active_player == players[0] else players[0]
         else:
             next_step = phase_order[current_phase_index + 1]
 
+        # 1. Skip ASSIGN_DAMAGE_ORDER if no attackers are multi-blocked
+        if next_step == InGamePhase.ASSIGN_DAMAGE_ORDER and not self.requires_damage_ordering(game_state):
+            game_state.current_step = next_step
+            return self.advance_phase(game_state)
+
+        # 2. Skip FIRST_STRIKE_DAMAGE if no active creatures have first/double strike
+        if next_step == InGamePhase.FIRST_STRIKE_DAMAGE and not self.has_first_strike_creatures(game_state):
+            game_state.current_step = next_step
+            return self.advance_phase(game_state)
+
+        # Update step state
         old_step = game_state.current_step
         game_state.current_step = next_step
         logging.info(f"Phase advanced from {old_step} to {next_step}.")
@@ -123,38 +308,67 @@ class GameEngine:
             turn=game_state.turn_number
         )
 
+        pdu_list: List[BaseModel] = [transition_pdu]
+
+        if next_step == InGamePhase.FIRST_STRIKE_DAMAGE:
+            damage_result_pdu = self.resolve_combat_damage(game_state, is_first_strike=True)
+            pdu_list.append(damage_result_pdu)
+
+        elif next_step == InGamePhase.COMBAT_DAMAGE:
+            damage_result_pdu = self.resolve_combat_damage(game_state, is_first_strike=False)
+            pdu_list.append(damage_result_pdu)
+
+        elif next_step == InGamePhase.POST_COMBAT_MAIN:
+            game_state.reset_combat_state()
+
+        # --- PRIORITY & SBA PROCESSING ---
+        state_update_pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=game_state.to_in_game_state() # Uses the new mapping method
+        )
+        
         if next_step == InGamePhase.UNTAP:
-            # not sure if meron pang need gawin sa untap phase,
-            # pero for now same code lang muna sya as before ko inisplit
-            # ung untap and cleanup conditions
-            active_player = game_state.players[game_state.active_player]
-            #No priority granted during these phases
             game_state.priority_player = None
-            logging.debug(f"[ENGINE SEND] Phase transition (No Priority). Generated PDU: PHASE_TRANSITION ({next_step})")
-            return [transition_pdu]
+            pdu_list.append(state_update_pdu)
+            return pdu_list
         elif next_step == InGamePhase.CLEANUP:
+            # Reset marked damage on all creatures during cleanup
+            for player in game_state.players.values():
+                for perm in player.battlefield:
+                    perm.damage = 0
+
             active_player = game_state.players[game_state.active_player]
             hand_diff = len(active_player.hand) - 7
-            if hand_diff > 0: # need magtapon
-                logging.info(f'Player {active_player} needs to discard {hand_diff} card{'s' if hand_diff > 1 else ''}.')
-                return [transition_pdu]
-            else: # cleanup ok
-                next_pdu = self.advance_phase(game_state)
-                return [transition_pdu] + next_pdu
+            if hand_diff > 0:
+                logging.info(f'Player {active_player} needs to discard {hand_diff} card(s).')
+                pdu_list.append(state_update_pdu)
+                return pdu_list
+            else:
+                next_pdus = self.advance_phase(game_state)
+                return pdu_list + next_pdus
         else:
             game_state.priority_player = game_state.active_player
+
+            # Assign and track the expected sequence number 
+            grant_seq = game_state.get_next_seq_num()
+            game_state.expected_seq_num = grant_seq
+
             grant_pdu = PriorityGrant(
                 type=PDUType.PRIORITY_GRANT,
-                seq_num=game_state.get_next_seq_num(),
+                seq_num=grant_seq,
                 player_id=game_state.priority_player,
                 time_limit_ms=60000
             )
-            logging.debug(f"[ENGINE SEND] Phase transition. Generated PDUs: PHASE_TRANSITION ({next_step}), PRIORITY_GRANT")
+            
             sba_results = self.check_state_based_action(game_state)
             if sba_results:
-                return sba_results
-            return [transition_pdu, grant_pdu]
-
+                return pdu_list + [state_update_pdu] + sba_results
+            
+            pdu_list.append(state_update_pdu)
+            pdu_list.append(grant_pdu)
+            return pdu_list
+        
     def resolve_stack(self, game_state: GameState):
         """
         Pop the top item, applies effects, and re-grants priority
@@ -189,21 +403,30 @@ class GameEngine:
         # After resolving, grant priority to the active player
         game_state.priority_player = game_state.active_player
 
+        state_update_pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=game_state.to_in_game_state() # Uses the new mapping method
+        )
+
+        grant_seq = game_state.get_next_seq_num()
+        game_state.expected_seq_num = grant_seq
+
         grant_pdu = PriorityGrant(
             type=PDUType.PRIORITY_GRANT,
-            seq_num=game_state.get_next_seq_num(),
+            seq_num=grant_seq,
             player_id=game_state.priority_player,
             time_limit_ms=60000
         )
 
         sba_results = self.check_state_based_action(game_state)
         if sba_results:
-            return sba_results
+            return [state_update_pdu] + sba_results
 
         logging.info(f"Stack item {resolved_item['stack_item_id']} resolved.")
         logging.debug(f"[ENGINE SEND] Stack item resolved. Generated PDUs: STACK_RESOLVE, PRIORITY_GRANT")
 
-        return [resolved_pdu, grant_pdu]
+        return [resolved_pdu, state_update_pdu, grant_pdu]
 
     def handle_cast_spell(self, player_id: str, spell_pdu: CastSpell, game_state: GameState) -> List[BaseModel] | Error:
         """
@@ -232,7 +455,7 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="UNKNOWN_CARD",
+                code="ILLEGAL_ACTION",
                 message=f"'{base_card_id}' is not found in the card catalog."
             )
         cmc = card_in_question.get("cmc", 0)
@@ -282,10 +505,19 @@ class GameEngine:
             controller=player_id
         )
 
+        state_update_pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=game_state.to_in_game_state()
+        )
+
+        grant_seq = game_state.get_next_seq_num()
+        game_state.expected_seq_num = grant_seq
+
         #Priority is re-granted to the player who cast the spell
         grant_pdu = PriorityGrant(
             type=PDUType.PRIORITY_GRANT,
-            seq_num=game_state.get_next_seq_num(),
+            seq_num=grant_seq,
             player_id=player_id,
             time_limit_ms=60000
         )
@@ -294,9 +526,9 @@ class GameEngine:
 
         if sba_results:
             # If the game is over, broadcast the push/resolve, then the game over.
-            return [push_pdu] + sba_results
+            return [push_pdu, state_update_pdu] + sba_results
 
-        return [push_pdu, grant_pdu]
+        return [push_pdu, state_update_pdu, grant_pdu]
 
     def is_target_valid(self, target_id: str, game_state: GameState) -> bool:
         """
@@ -309,8 +541,8 @@ class GameEngine:
         # Is the target permanent on the battlefield
         for player in game_state.players.values():
             for permanent in player.battlefield:
-                #depends on how battlefield dict is structured
-                if permanent.get("id") == target_id:
+                # Access .id attribute on CardInstance directly
+                if permanent.id == target_id:
                     return True
         return False
 
@@ -373,16 +605,16 @@ class GameEngine:
             surviving_permanents = []
 
             for perm in player_state.battlefield:
-                #.get() safely in case non-creature permanents (like lands) are present
-                toughness = perm.get("toughness")
+                # Access CardInstance properties directly
+                toughness = perm.toughness
 
                 # If toughness is defined, check if the creature should die due to damage
                 if toughness is not None:
-                    damage = perm.get("damage", 0)
+                    damage = perm.damage
                     if toughness <= 0 or damage >= toughness:
                         # Creature dies, move to graveyard
-                        player_state.graveyard.append(perm["id"])
-                        logging.debug(f"[ENGINE STATE] SBA: Creature {perm['id']} died and moved to graveyard.")
+                        player_state.graveyard.append(perm.id)
+                        logging.debug(f"[ENGINE STATE] SBA: Creature {perm.id} died and moved to graveyard.")
                         continue # Skip adding it to surviving permanents
 
                 surviving_permanents.append(perm)
@@ -397,7 +629,7 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="NOT_YOUR_TURN",
+                code="ILLEGAL_ACTION",
                 message="Land can only be played during your turn or when you have priority.",
                 rejected_action=land_pdu.model_dump()
             )
@@ -414,7 +646,7 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="LAND_LIMIT_REACHED",
+                code="ILLEGAL_ACTION",
                 message="Land already played for this turn.",
                 rejected_action=land_pdu.model_dump()
             )
@@ -422,22 +654,34 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="LAND_NOT_IN_HAND",
+                code="ILLEGAL_ACTION",
                 message=f"{land_pdu.card_id} is not in player {player_id}'s hand.",
                 rejected_action=land_pdu.model_dump()
             )
-        player.hand.remove(land_pdu.card_id)
-        player.battlefield.append({ 'card_id': land_pdu.card_id, 'tapped': False })
+        
+        # Move card to battlefield as a CardInstance object instead of adding a dict
+        player.move_to_battlefield(land_pdu.card_id)
         player.lands_played_this_turn += 1
         game_state.passes_in_a_row = 0
         logging.info(f'Player {player_id} plays land: {land_pdu.card_id}')
+
+        # game state update pdu
+        state_update_pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=game_state.to_in_game_state() # Uses the new mapping method
+        )
+
+        grant_seq = game_state.get_next_seq_num()
+        game_state.expected_seq_num = grant_seq  # Sync expected priority token
+        
         grant_pdu = PriorityGrant(
             type=PDUType.PRIORITY_GRANT,
-            seq_num=game_state.get_next_seq_num(),
+            seq_num=grant_seq,
             player_id=player_id,
             time_limit_ms=60000
         )
-        return [grant_pdu]
+        return [state_update_pdu, grant_pdu]
 
     def trigger_order_response(self, player_id: str, response_pdu: TriggerOrderResponse, game_state: GameState):
         pending = game_state.pending_triggers.get(player_id, [])
@@ -445,7 +689,7 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="NO_TRIGGER",
+                code="TRIGGER_ORDER_INVALID",
                 message=f"Player {player_id}'s trigger stack is empty."
             )
         pending_ids = [ trigger["trigger_id"] for trigger in pending ]
@@ -453,7 +697,7 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="INVALID_TRIGGER",
+                code="TRIGGER_ORDER_INVALID",
                 message="Trigger IDs mismatch the current pending stack."
             )
         pdu_list: List[StackPush | PriorityGrant] = []
@@ -484,9 +728,20 @@ class GameEngine:
             ))
         game_state.pending_triggers[player_id] = []
         game_state.passes_in_a_row = 0
+
+        state_update_pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=game_state.to_in_game_state() # Uses the new mapping method
+        )
+        pdu_list.append(state_update_pdu)
+
+        grant_seq = game_state.get_next_seq_num()
+        game_state.expected_seq_num = grant_seq  # Sync expected priority token
+        
         grant_pdu = PriorityGrant(
             type=PDUType.PRIORITY_GRANT,
-            seq_num=game_state.get_next_seq_num(),
+            seq_num=grant_seq,
             player_id=game_state.active_player,
             time_limit_ms=60000
         )
@@ -505,7 +760,7 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="NOT_YOUR_TURN",
+                code="ILLEGAL_ACTION",
                 message="Only the active player can discard through this discard type."
             )
         player = game_state.players[player_id]
@@ -514,14 +769,14 @@ class GameEngine:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="NO_CLEANUP_DISCARD",
+                code="ILLEGAL_ACTION",
                 message="Cleanup discards only happen when there are more than 7 cards in a player's hand."
             )
         if len(discard_pdu.card_ids) != hand_diff:
             return Error(
                 type=PDUType.ERROR,
                 seq_num=game_state.get_next_seq_num(),
-                code="DISCARD_COUNT_MISMATCH",
+                code="ILLEGAL_ACTION",
                 message=f"{hand_diff} card{'s' if hand_diff > 1 else ''} must be discarded by player {player_id}."
             )
         for card_id in discard_pdu.card_ids:
@@ -529,9 +784,237 @@ class GameEngine:
                 return Error(
                     type=PDUType.ERROR,
                     seq_num=game_state.get_next_seq_num(),
-                    code="DISCARD_NON_EXISTENT",
+                    code="ILLEGAL_ACTION",
                     message=f"{card_id} was not found in player {player_id}'s hand during execution."
                 )
         player.raw_discard(discard_pdu.card_ids)
         logging.info(f'Player {player_id} discarded a total of {hand_diff} card{'s' if hand_diff > 1 else ''}.')
         return self.advance_phase(game_state)
+
+    # Combat Phase Functions added to handle the logic required for that phased
+    
+    def handle_declare_attackers(self, player_id: str, attackers_pdu: DeclareAttackers, game_state: GameState) -> List[BaseModel] | Error:
+        if game_state.current_step != InGamePhase.DECLARE_ATTACKERS:
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="WRONG_PHASE",
+                message="Attackers can only be declared during the DECLARE_ATTACKERS step."
+            )
+        if game_state.active_player != player_id:
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="ILLEGAL_ACTION",
+                message="Only the active player can declare attackers."
+            )
+
+        active_player_state = game_state.players[player_id]
+        declared_ids = [a.creature_id for a in attackers_pdu.attackers]
+
+        # If no attackers declared, skip combat steps directly to POSTCOMBAT_MAIN
+        if not declared_ids:
+            logging.info("No attackers declared. Skipping directly to END_OF_COMBAT.")
+            game_state.current_step = InGamePhase.END_OF_COMBAT
+            
+            transition_pdu = PhaseTransition(
+                type=PDUType.PHASE_TRANSITION,
+                seq_num=game_state.get_next_seq_num(),
+                from_phase=InGamePhase.DECLARE_ATTACKERS,
+                to_phase=InGamePhase.END_OF_COMBAT,
+                active_player=game_state.active_player,
+                turn=game_state.turn_number
+            )
+
+            state_update_pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=game_state.to_in_game_state() # Uses the new mapping method
+            )
+
+            grant_seq = game_state.get_next_seq_num()
+            game_state.expected_seq_num = grant_seq  # Sync expected priority token
+
+            grant_pdu = PriorityGrant(
+                type=PDUType.PRIORITY_GRANT,
+                seq_num=grant_seq,
+                player_id=game_state.active_player,
+                time_limit_ms=60000
+            )
+            return [transition_pdu, state_update_pdu, grant_pdu]
+        
+        # Validate each declared attacker
+        for card_id in declared_ids:
+            card = active_player_state.get_battlefield_card(card_id)
+            if not card:
+                return Error(
+                    type=PDUType.ERROR,
+                    seq_num=game_state.get_next_seq_num(),
+                    code="ILLEGAL_TARGET",
+                    message=f"Creature {card_id} is not on the battlefield."
+                )
+            if card.tapped or card.summoning_sick:
+                return Error(
+                    type=PDUType.ERROR,
+                    seq_num=game_state.get_next_seq_num(),
+                    code="ILLEGAL_ACTION",
+                    message=f"Creature {card_id} is tapped or has summoning sickness."
+                )
+
+        # Tap declared attackers and record state
+        for card_id in declared_ids:
+            card = active_player_state.get_battlefield_card(card_id)
+            card.tapped = True
+            game_state.attackers.append(card_id)
+
+        game_state.passes_in_a_row = 0
+        state_update_pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=game_state.to_in_game_state() # Uses the new mapping method
+        )
+
+        grant_seq = game_state.get_next_seq_num()
+        game_state.expected_seq_num = grant_seq  # Sync expected priority token
+        
+        grant_pdu = PriorityGrant(
+            type=PDUType.PRIORITY_GRANT,
+            seq_num=grant_seq,
+            player_id=player_id,
+            time_limit_ms=60000
+        )
+        return [state_update_pdu, grant_pdu]
+
+
+    def handle_declare_blockers(self, player_id: str, blockers_pdu: DeclareBlockers, game_state: GameState) -> List[BaseModel] | Error:
+        if game_state.current_step != InGamePhase.DECLARE_BLOCKERS:
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="WRONG_PHASE",
+                message="Blockers can only be declared during the DECLARE_BLOCKERS step."
+            )
+        if game_state.active_player == player_id:
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="ILLEGAL_ACTION",
+                message="Only the defending player can declare blockers."
+            )
+
+        defending_player_state = game_state.players[player_id]
+        blocks = {b.creature_id: b.blocking_id for b in blockers_pdu.blockers}
+
+        for blocker_id, attacker_id in blocks.items():
+            blocker = defending_player_state.get_battlefield_card(blocker_id)
+            if not blocker or blocker.tapped:
+                return Error(
+                    type=PDUType.ERROR,
+                    seq_num=game_state.get_next_seq_num(),
+                    code="ILLEGAL_ACTION",
+                    message=f"Blocker {blocker_id} is invalid or tapped."
+                )
+            if attacker_id not in game_state.attackers:
+                return Error(
+                    type=PDUType.ERROR,
+                    seq_num=game_state.get_next_seq_num(),
+                    code="ILLEGAL_TARGET",
+                    message=f"Attacker {attacker_id} was not declared as an attacker."
+                )
+
+        game_state.blockers = blocks
+        game_state.passes_in_a_row = 0
+
+        state_update_pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=game_state.to_in_game_state() # Uses the new mapping method
+        )
+
+        grant_seq = game_state.get_next_seq_num()
+        game_state.expected_seq_num = grant_seq  # Sync expected priority token
+
+        grant_pdu = PriorityGrant(
+            type=PDUType.PRIORITY_GRANT,
+            seq_num=grant_seq,
+            player_id=game_state.active_player,
+            time_limit_ms=60000
+        )
+        return [state_update_pdu, grant_pdu]
+    
+    def handle_assign_damage_order(self, player_id: str, pdu: AssignDamageOrder, game_state: GameState) -> List[BaseModel] | Error:
+        if game_state.current_step != InGamePhase.ASSIGN_DAMAGE_ORDER:
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="WRONG_PHASE",
+                message="Damage order can only be assigned during ASSIGN_DAMAGE_ORDER step."
+            )
+        if game_state.active_player != player_id:
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="ILLEGAL_ACTION",
+                message="Only the active player can assign damage order."
+            )
+
+        attacker_id = pdu.attacker_id
+        ordered_blocker_ids = pdu.blocker_order
+
+        # Validate that the attacker was declared
+        if attacker_id not in game_state.attackers:
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="ILLEGAL_TARGET",
+                message=f"Attacker {attacker_id} does not exist in combat."
+            )
+
+        # Retrieve actual blockers assigned to this attacker
+        actual_blockers = [b_id for b_id, a_id in game_state.blockers.items() if a_id == attacker_id]
+
+        # Verify blocker list matches assigned blockers exactly
+        if sorted(actual_blockers) != sorted(ordered_blocker_ids):
+            return Error(
+                type=PDUType.ERROR,
+                seq_num=game_state.get_next_seq_num(),
+                code="ILLEGAL_ACTION",
+                message="Ordered blockers list does not match declared blockers for this attacker."
+            )
+
+        # Store damage assignment order
+        game_state.damage_orders[attacker_id] = ordered_blocker_ids
+        game_state.passes_in_a_row = 0
+
+        multi_blocked_ids = [
+            a_id for a_id in game_state.attackers
+            if sum(1 for target_a in game_state.blockers.values() if target_a == a_id) > 1
+        ]
+
+        # Check if we have received an order for every multi-blocked attacker
+        if all(a_id in game_state.damage_orders for a_id in multi_blocked_ids):
+            # All orders received! Advance the sequence token and open the final priority window
+            state_update_pdu = GameStateUpdate(
+                type=PDUType.GAME_STATE_UPDATE,
+                seq_num=game_state.get_next_seq_num(),
+                state=game_state.to_in_game_state() # Uses the new mapping method
+            )
+
+            grant_seq = game_state.get_next_seq_num()
+            game_state.expected_seq_num = grant_seq
+
+            grant_pdu = PriorityGrant(
+                type=PDUType.PRIORITY_GRANT,
+                seq_num=grant_seq,
+                player_id=player_id,
+                time_limit_ms=60000
+            )
+            return [state_update_pdu, grant_pdu]
+
+        # Still waiting on more orders.
+        state_update_pdu = GameStateUpdate(
+            type=PDUType.GAME_STATE_UPDATE,
+            seq_num=game_state.get_next_seq_num(),
+            state=game_state.to_in_game_state() # Uses the new mapping method
+        )
+        return [state_update_pdu]

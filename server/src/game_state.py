@@ -22,22 +22,35 @@ class CardInstance:
     This also has runtime attributes for a dynamic state
     """
     def __init__(self, instance_id: str, catalog: Dict[str, Any]):
-        self.id: str = instance_id #instance ID 
+        self.id: str = instance_id 
         self.base_id: str = extract_base_id(instance_id)
 
         # Static template rules from the pre-loaded catalog
         meta = catalog.get(self.base_id, {})
-        self.name: str = meta.get("name", "Unknown") # gets the name attribute and returns 'Unknown if null
+        self.name: str = meta.get("name", "Unknown")
         self.card_type: str = meta.get("type", "")
         self.base_power: Optional[int] = meta.get("power")
         self.base_toughness: Optional[int] = meta.get("toughness")
+        self.effect: str = meta.get("effect", "")
+
+        # Parse keywords directly from the effect description text
+        effect_lower = self.effect.lower()
+        self.first_strike: bool = "first strike" in effect_lower
+        self.double_strike: bool = "double strike" in effect_lower
+        self.haste: bool = "haste" in effect_lower
+        self.flying: bool = "flying" in effect_lower
 
         # Runtime Attributes
         self.tapped: bool = False
         self.damage: int = 0
         self.power: Optional[int] = self.base_power
         self.toughness: Optional[int] = self.base_toughness
-        self.summoning_sick: bool = True if "Creature" in self.card_type else False
+        
+        # Bypass summoning sickness if creature has Haste
+        if "Creature" in self.card_type:
+            self.summoning_sick: bool = not self.haste
+        else:
+            self.summoning_sick: bool = False
 
     def to_pdu_dict(self) -> Dict[str, Any]:
         """
@@ -101,17 +114,34 @@ class PlayerState:
                 logging.info(f'Player {self.player_id} discarded card {card_id}.')
 
     def pay_mana(self, mana_payment: Dict[str, int]):
-        land_taps = []
-        for land_id, mana_cost in mana_payment.items():
-            untapped_lands = []
-            for card in self.battlefield:
-                if card['card_id'] == land_id and not card.get('tapped', False):
-                    untapped_lands.append(card)
-            if len(untapped_lands) < mana_cost:
-                return False
-            land_taps.extend(untapped_lands[:mana_cost])
-        for land in land_taps:
-            land['tapped'] = True
+        """
+        Validates and taps lands matching the provided mana_payment dictionary:
+        e.g., {"forest_001": 1, "forest_002": 1}
+        """
+        lands_to_tap = []
+        available_lands = [c for c in self.battlefield if "Land" in c.card_type and not c.tapped]
+
+
+        for color, amount in mana_payment.items():
+            if amount <= 0: continue
+
+            found = 0
+            for land in available_lands:
+                if land in lands_to_tap:
+                    continue
+                land_meta = self.catalog.get(land.base_id, {})
+                #Check match for color in land_meta.get("color", []):
+                if land_meta.get("color") == color or color in ["Generic", "X"]:
+                    lands_to_tap.append(land)
+                    found += 1
+                    if found == amount:
+                        break
+            if found < amount:
+                return False  # Not enough lands to pay the mana cost
+
+        # Tap verified lands
+        for land in lands_to_tap:
+            land.tapped = True
         return True
 
     def reset_hand_to_library(self):
@@ -155,6 +185,12 @@ class GameState:
         self.player_sockets: Dict[str, Any] = {}
         self.active_player: Optional[str] = None
         self.seq_num: int = 1
+        self.expected_seq_num: int = 1 # Tracks active priority sequence token
+
+        self.attackers: List[str] = [] # List of attacking card instance_ids
+        self.blockers: Dict[str, str] = {} # Maps blocker_instance_id -> attacker_instance_id
+
+        self.damage_orders: Dict[str, List[str]] = {}  # Maps attacker_id -> [blocker_id1, blocker_id2, ...]
 
         self.turn_number: int = 1
         self.current_turn_phase: str = "BEGINNING" # BEGINNING, MAIN_1, COMBAT, MAIN_2, END
@@ -215,10 +251,62 @@ class GameState:
         """
         self.phase = "LOBBY"
         self.players = {}
+        self.socket_to_player = {}
+        self.player_sockets = {}
         self.stack = []
-        self.current_step = None
+        self.current_step = "UNTAP"
         self.priority_player = None
         self.active_player = None
         self.turn_number = 0
         self.passes_in_a_row = 0
+
+    def reset_combat_state(self):
+        """
+        Clears attacker and blocker mappings at the end of combat.
+        Also clears damage orders
+        """
+        self.attackers.clear()
+        self.blockers.clear()
+        self.damage_orders.clear()
+
+    def to_in_game_state(self, viewer_id: str = None) -> dict:
+        """
+        Serializes the game state to match the RFC v1.0 GAME_STATE_UPDATE schema.
+        If viewer_id is provided, it masks the opponent's hand.
+        """
+        # Determine if the active player has played a land
+        land_played = False
+        if self.active_player and self.active_player in self.players:
+            land_played = self.players[self.active_player].lands_played_this_turn > 0
+
+        # Construct basic state properties
+        state_dict = {
+            "turn": self.turn_number,
+            "active_player": self.active_player,
+            "phase": self.current_step,
+            "priority_holder": self.priority_player,
+            "life_totals": {p_id: p.life for p_id, p in self.players.items()},
+            "stack": self.stack,
+            "battlefield": {p_id: [c.to_pdu_dict() for c in p.battlefield] for p_id, p in self.players.items()},
+            "graveyard": {p_id: p.graveyard for p_id, p in self.players.items()},
+            "library_counts": {p_id: len(p.library) for p_id, p in self.players.items()},
+            "land_played_this_turn": land_played,
+            "hand": {},
+            "hand_counts": {}
+        }
+
+        # Populate hands and hand counts based on who is viewing the state
+        for p_id, p in self.players.items():
+            if viewer_id is None or p_id == viewer_id:
+                # If no viewer specified (broadcasting all info) or viewing own hand
+                state_dict["hand"][p_id] = p.hand
+            else:
+                # Masking opponent's hand
+                state_dict["hand_counts"][p_id] = len(p.hand)
+                
+            # It's usually safe to include hand_counts for everyone just in case
+            if viewer_id is None:
+                 state_dict["hand_counts"][p_id] = len(p.hand)
+
+        return state_dict
 
