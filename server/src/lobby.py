@@ -67,7 +67,7 @@ def handle_player_ready(conn, payload: dict, game_state: GameState) -> bool:
     Returns True if game setup is triggered.
     """
     seq_num = payload.get("seq_num", 0)
-    deck = payload.get("deck_list")
+    deck = payload.get("deck_list", [])
 
     if not isinstance(deck, list) or not (1 <= len(deck) <= 50):
         return send_error_response(
@@ -77,6 +77,25 @@ def handle_player_ready(conn, payload: dict, game_state: GameState) -> bool:
             "Decks must contain between 1 and 50 card IDs.",
             payload
         )
+
+    for card_id in deck:        
+        if deck.count(card_id) > 1:
+            return send_error_response(
+                conn,
+                seq_num,
+                'ILLEGAL_DECK',
+                f'There are multiple instances of {card_id} in player\'s deck.',
+                payload
+            )     
+        base_id = card_id.rsplit('_', 1)[0]
+        if base_id == card_id or base_id not in game_state.catalog:
+            return send_error_response(
+                conn,
+                seq_num,
+                'ILLEGAL_DECK',
+                f'Unable to recognize card {base_id}',
+                payload
+            )
 
     try:
         pdu = PlayerReady(**payload) # auto checks deck length
