@@ -27,9 +27,10 @@ CSNETWK-MTGNP/
 │
 ├── client/
 │   └── src/                          # 1. Thin Client Application
-│       ├── client.py                 # Client entry point & TCP socket UI interface
-│       ├── client-test.py            # Automated client connection test script
-│       └── rubric-test.py            # Rubric compliance validation suite
+│       ├── client-combat.py          # Outdated version of client.py
+│       ├── client-test.py            # Testing area of client.py
+│       ├── client.py                 # Final client entry point (player)
+│       └── rubric-test.py            # Rubric compliance validation testing
 │
 ├── server/
 │   └── src/                          # 2. Server & Game Engine
@@ -119,7 +120,22 @@ A detailed report of tasks implemented by each member
 | Tool Name | Feature / Purpose | Specific Scope / Modules | Description of Assistance |
 | :--- | :--- | :--- | :--- |
 | Gemini v3.6 Flash | *Understanding MTG Concepts based on RFC* | N/A | *Helped on digesting information from the given specifications for the project.* |
-| Gemini v3.6 Flash | *Syntax* | `server/src/framer.py`, `server/src/game_state.py` | *Helped polish syntax based on initial draft of states and implement features involved.* |
-| Gemini v3.6 Flash | *Syntax* | `server/src/lobby.py` | *Assisted on the python syntax of implementing pseudocode for the features involved + rechecking of code logic.* |
 | Gemini v3.1 Pro Extended | *Implementation and Rechecking Program Logic* | `server/src/game_engine.py`, `server/src/game_state.py` | *Assisted on the mechanisms in order to implement features involved + rechecking of code logic* |
+| Gemini v3.6 Thinking | *Parsing Google Sheets to JSON*  | `shared/cards_catalog.json` | *Helped in creating a python file that automatically transforms the table given in the google sheets into a JSON format.* |
+| Gemini v3.6 Thinking | *Validation and Understanding of Battle Phase Logic* | `shared/src/server.py`, `shared/src/game_state.py`,  `shared/src/game_engine.py` | *Helped in implementing attacker and blocker logic in the battle phase.* |
+| Gemini v3.6 Thinking | *Debugging Combat Phase*  | `shared/src/server.py`, `shared/src/game_state.py`,  `shared/src/game_engine.py` | *Helped identify some missing requirements in the RFC implementation and also the missing attributes inside the classes in the game_state.py. This also helped me identify why there is a non matching sequence num and grant sequence num.* |
+| Gemini v3.6 Flash | *Syntax* | server/src/framer.py, server/src/game_state.py | *Helped polish syntax based on initial draft of states and implement features involved.* |
+| Gemini v3.6 Flash | *Implementation and Rechecking Program Logic* | server/src/lobby.py | *Assisted on the python syntax of implementing pseudocode for the features involved + rechecking of code logic.* |
+
 ## Known Limitation or Deviations from the RFC
+### Engine & Rules Deviations
+* Exile Zone Mechanics: Spells such as swords_to_plowshares and path_to_exile apply 999 damage to destroy creatures via State-Based Actions rather than sending cards to a distinct Exile zone or resolving secondary spell logic (e.g., land searching, life conversion).
+* Modal & Payment Prompts: healing_salve resolves directly to life gain without presenting a modal prompt, and mana_leak counters target spells immediately without giving the target player an option to pay {3} generic mana.
+* Static Keyword Parsing: Keywords like trample, defender, hexproof, and vigilance present in cards_catalog.json are not extracted during CardInstance initialization.
+* Unhandled Catalog Cards: Utility cards defined in cards_catalog.json—including dark_ritual, sol_ring, ponder, pacifism, millstone, and merfolk_looter—lack execution handlers in apply_spell_ability_effect.
+* Simplified Priority System: Fast-effects and instant-speed responses operate on a simplified LIFO stack push/pop cycle rather than offering strict priority-passing windows across every step transition.
+### Networking & Protocol (RFC) Limitations
+* Connection Drop & Reconnect: Mid-game disconnections are not recoverable; if a socket closes, the server terminates the game session instead of restoring game_state.
+* Out-of-Order PDU Handling: The framing layer processes incoming JSON payloads sequentially using stream buffer delimiters (framer.py); out-of-order or corrupt PDUs trigger an immediate error response rather than auto-retransmit requests.
+* Concurrency & Timing Constraints: The lobby supports pair-based match initialization but does not support multi-room concurrent game execution or spectator mode.
+
