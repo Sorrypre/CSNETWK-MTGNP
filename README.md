@@ -82,5 +82,8 @@ A detailed report of tasks implemented by each member
 
 | Tool Name | Feature / Purpose | Specific Scope / Modules | Description of Assistance |
 | :--- | :--- | :--- | :--- |
-| *e.g., ChatGPT (GPT-4o)* | *Debugging / Syntax* | `src/network/socket_handler.py` | *Helped resolve non-blocking socket handling edge cases.* |
+| Gemini v3.6 Flash | *Understanding MTG Concepts based on RFC* | N/A | *Helped on digesting information from the given specifications for the project.* |
+| Gemini v3.6 Flash | *Syntax* | `server/src/framer.py`, `server/src/game_state.py` | *Helped polish syntax based on initial draft of states and implement features involved.* |
+| Gemini v3.6 Flash | *Syntax* | `server/src/lobby.py` | *Assisted on the python syntax of implementing pseudocode for the features involved + rechecking of code logic.* |
+| Gemini v3.1 Pro Extended | *Implementation and Rechecking Program Logic* | `server/src/game_engine.py`, `server/src/game_state.py` | *Assisted on the mechanisms in order to implement features involved + rechecking of code logic* |
 ## Known Limitation or Deviations from the RFC
