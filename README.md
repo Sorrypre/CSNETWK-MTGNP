@@ -68,13 +68,13 @@ A detailed report of tasks implemented by each member
 | Game lifecycle: LOBBY, GAME_SETUP, MULLIGAN logic | ✓ | - | - | ✓ | - | 
 | Turn & phase engine (all phases/steps, transitions) | ✓ | - | - | - | - | 
 | Priority & Stack logic, spell/ability resolution | ✓ | - | - | - | - | 
-| Combat system (attackers, blockers, damage) | - | - | - | - | - | 
+| Combat system (attackers, blockers, damage) | - | ✓ | - | - | - | 
 | Client implementation & state rendering | ✓ | - | - | - | - | 
-| PDU serialization/deserialization (all 25 PDU types) | ✓ | - | - | - | - | 
+| PDU serialization/deserialization (all 25 PDU types) | ✓ | ✓ | - | - | - | 
 | Error handling, PING/PONG heartbeat, disconnect logic| ✓ | - | - | ✓ | - | 
-| Verbose mode (client + server PDU logging, toggle on/off) | - | - | - | ✓ | - | 
+| Verbose mode (client + server PDU logging, toggle on/off) | - | ✓ | - | ✓ | - | 
 | Testing & interoperability | ✓ | ✓ | ✓ | ✓ | - |
-| README / documentation / AI disclosure |  - | - | - | - | - | 
+| README / documentation / AI disclosure |  - | ✓ | - | - | - | 
 
 
 ## AI Usage
