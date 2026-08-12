@@ -1,4 +1,5 @@
 from pydantic import ValidationError
+from typing import cast
 from schemas import *
 from framer import send_framed_message
 from game_state import PlayerState, GameState
@@ -79,7 +80,7 @@ def handle_player_ready(conn, payload: dict, game_state: GameState) -> bool:
             payload
         )
 
-    for card_id in deck:        
+    for card_id in deck:
         if deck.count(card_id) > 1:
             return send_error_response(
                 conn,
@@ -87,8 +88,40 @@ def handle_player_ready(conn, payload: dict, game_state: GameState) -> bool:
                 'ILLEGAL_DECK',
                 f'There are multiple instances of {card_id} in player\'s deck.',
                 payload
-            )     
-        base_id = card_id.rsplit('_', 1)[0]
+            )
+        split = str(card_id).rsplit('_', 1)
+        if len(split) != 2:
+            return send_error_response(
+                conn,
+                seq_num,
+                'ILLEGAL_DECK',
+                f'{split[0]} has no copy number (_0XX) attached.',
+                payload
+            )
+        base_id = split[0]
+        identifier = split[1]
+        if len(identifier) != 3:
+            return send_error_response(
+                conn,
+                seq_num,
+                'ILLEGAL_DECK',
+                f'Unable to recognize card {base_id}_{identifier}',
+                payload
+            )
+        card = game_state.catalog.get(base_id, None)
+        if card:
+            info = cast(dict[str, Any], card)
+            copy_number = int(split[1])
+            copies = int(info.get('copies_in_set', 0))
+            # Must follow _0XX convention
+            if not 1 <= copy_number <= copies:
+                return send_error_response(
+                    conn,
+                    seq_num,
+                    'ILLEGAL_DECK',
+                    f'Copy #{copy_number} of {base_id} is not present in the catalog.',
+                    payload
+                )
         if base_id == card_id or base_id not in game_state.catalog:
             return send_error_response(
                 conn,
