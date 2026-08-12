@@ -347,6 +347,13 @@ def receive(conn, addr):
                         if player_id not in game_state.players:
                             continue
 
+                        if len(game_state.players) < 2:
+                            game_state.players.pop(player_id, None)
+                            game_state.player_sockets.pop(player_id, None)
+                            game_state.socket_to_player.pop(conn, None)
+                            broadcast_game_state(game_state)
+                            continue
+
                         players = list(game_state.players.keys())
                         winner_id = players[1] if player_id == players[0] else players[0]
 
