@@ -94,13 +94,13 @@ def process_engine_result(result, conn):
             active_conn = game_state.player_sockets.get(pdu.player_id)
             if active_conn:
                 log_pdu_exchange(f"S -> {pdu.player_id}", f"grant priority to {pdu.player_id}", pdu.model_dump())
+                payload_bytes = pdu.model_dump_json().encode('utf-8')
                 send_framed_message(active_conn, payload_bytes)
 
                 # Start a 60 second timer for the player to respond
                 timer = threading.Timer(60.0, priority_timeout, args=[pdu.player_id])
                 priority_timer[pdu.player_id] = timer
                 timer.start()
-
 def handle_disconnect(conn, p_id):
     """
     Disconnects the client from the game
