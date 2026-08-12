@@ -26,7 +26,8 @@ class GameEngine:
         Sequence number enforcer.
         Returns Error PDU if client sequence number is stale, otherwise returns None.
         """
-        logging.debug(f"[ENGINE RECEIVE] Validating PDU Type: {pdu_type} with seq_num: {client_seq_num}")
+        if pdu_type not in [PDUType.PING, PDUType.PONG]:
+            logging.debug(f"[ENGINE RECEIVE] Validating PDU Type: {pdu_type} with seq_num: {client_seq_num}")
 
         if pdu_type in [PDUType.PING, PDUType.CONCEDE, PDUType.PLAYER_READY, PDUType.MULLIGAN_CHOICE]:
             return None
