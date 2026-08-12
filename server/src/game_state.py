@@ -210,7 +210,7 @@ class GameState:
         if os.path.exists(catalog_path):
             with open(catalog_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        print(f"Warning: Catalog file not found at {catalog_path}")
+        logging.info(f"Warning: Catalog file not found at {catalog_path}")
         return {}
 
     def get_next_seq_num(self) -> int:
