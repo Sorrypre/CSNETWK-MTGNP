@@ -69,7 +69,7 @@ def process_engine_result(result, conn):
         ]:
             log_pdu_exchange("S -> ALL", f"broadcast {pdu.type}", pdu.model_dump())
 
-            for client_conn in game_state.player_sockets.values():
+            for client_conn in list(game_state.player_sockets.values()):
                 send_framed_message(client_conn, payload_bytes)
 
             if pdu.type == PDUType.GAME_OVER:
@@ -78,7 +78,7 @@ def process_engine_result(result, conn):
 
         #PERSONLIZED GAME_STATE_UPDATE sends a unique view to each player
         elif pdu.type == PDUType.GAME_STATE_UPDATE:
-            for p_id, client_conn in game_state.player_sockets.items():
+            for p_id, client_conn in list(game_state.player_sockets.items()):
                 #Masks the opponent's hand
                 personalized_state = game_state.to_in_game_state(viewer_id=p_id)
 
@@ -213,7 +213,7 @@ def receive(conn, addr):
                             )
                             log_pdu_exchange("S -> ALL", "broadcast PHASE_TRANSITION", transition_pdu.model_dump())
                             payload = transition_pdu.model_dump_json().encode('utf-8')
-                            for c in game_state.player_sockets.values():
+                            for c in list(game_state.player_sockets.values()):
                                 send_framed_message(c, payload)
 
                             # Advance from UNTAP to UPKEEP
@@ -366,8 +366,8 @@ def receive(conn, addr):
                         )
 
                         payload_bytes = game_over_pdu.model_dump_json().encode('utf-8')
-                        for client_conn in game_state.player_sockets.values():
-                            send_framed_message(client_conn, payload_bytes)
+                        for client_conn in list(game_state.player_sockets.values()):
+                                send_framed_message(client_conn, payload_bytes)
 
                         #Reset the game state after a player concedes
                         game_state.reset_game_state()
@@ -385,7 +385,7 @@ def receive(conn, addr):
         with connections_lock:
             if conn in active_connections:
                 active_connections.remove(conn)
-
+        with game_lock:
             # Clean up game state mappings if player disconnects
             p_id = game_state.socket_to_player.pop(conn, None)
             handle_disconnect(conn, p_id)
@@ -421,7 +421,7 @@ def priority_timeout(timed_out_player_id: str):
         log_pdu_exchange("S -> ALL", "broadcast GAME_OVER", game_over_pdu.model_dump())
 
         payload = game_over_pdu.model_dump_json().encode('utf-8')
-        for client_conn in game_state.player_sockets.values():
+        for client_conn in list(game_state.player_sockets.values()):
             send_framed_message(client_conn, payload)
 
         #Reset the game state after a player timeouts

@@ -33,17 +33,17 @@ def parse_command(inp: str) -> dict:
     try:
         # ready <player_name>
         if command == 'ready':
-             deck = [f"mountain_{i:03d}" for i in range(1, 11)] + \
+            deck = [f"mountain_{i:03d}" for i in range(1, 11)] + \
                 [f"goblin_guide_{i:03d}" for i in range(1, 5)] + \
                 [f"monastery_swiftspear_{i:03d}" for i in range(1, 5)] + \
                 [f"phantasmal_bear_{i:03d}" for i in range(1, 5)]
-             name = args[1]
-             return {
-                 'type': 'PLAYER_READY',
-                 'seq_num': this_seq_num,
-                 'player_id': name,
-                 'deck_list': deck
-             }
+            name = args[1]
+            return {
+                'type': 'PLAYER_READY',
+                'seq_num': this_seq_num,
+                'player_id': name,
+                'deck_list': deck
+            }
         # pass
         if command == 'pass':
             return {
@@ -56,7 +56,7 @@ def parse_command(inp: str) -> dict:
             cards_to_bottom = []          
             if not decision or decision == 'keep':
                 keep = True
-            elif decision == 'take':
+            elif decision == 'redraw':
                 keep = False
                 client_state['mulligan_count'] = client_state['mulligan_count'] + 1
             elif decision == 'confirm':
