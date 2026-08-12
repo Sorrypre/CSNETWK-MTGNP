@@ -43,7 +43,7 @@ def broadcast_game_state(game_state):
     else:
         # Personalized state generator
         seq_num = game_state.get_next_seq_num()
-        for p_id, conn in game_state.player_sockets.items():
+        for p_id, conn in list(game_state.player_sockets.items()):
             pdu = GameStateUpdate(
                 type=PDUType.GAME_STATE_UPDATE,
                 seq_num=seq_num,
