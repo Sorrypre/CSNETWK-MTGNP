@@ -138,7 +138,7 @@ def receive(conn, addr):
     """
     conn.settimeout(10.0)
 
-    print(f'Client connected from {addr}')
+    logging.info(f'Client connected from {addr}')
     try:
         while True:
             # 1. Read byte-framed message
@@ -392,7 +392,7 @@ def receive(conn, addr):
 
         try:
             conn.close()
-            print(f'Connection closed for {addr}')
+            logging.info(f'Connection closed for {addr}')
         except Exception: pass
 
 def priority_timeout(timed_out_player_id: str):
@@ -438,9 +438,9 @@ def main():
     try:
         server_socket.bind(('', PORT))
         listening = True
-        print(f'MTGNP Server started at localhost on port {PORT}')
+        logging.info(f'MTGNP Server started at localhost on port {PORT}')
     except socket.error:
-        print('Unable to start server')
+        logging.info('Unable to start server')
 
     try:
         server_socket.listen()
@@ -449,7 +449,7 @@ def main():
 
             with connections_lock:
                 if len(active_connections) >= MAX_CLIENTS:
-                    print(f'Rejected extra connection from {addr}')
+                    logging.info(f'Rejected extra connection from {addr}')
                     send_error_response(
                         conn,
                         seq_num=0,
@@ -462,7 +462,7 @@ def main():
             thread = threading.Thread(target=receive, args=(conn, addr), daemon=True)
             thread.start()
     except KeyboardInterrupt:
-        print('Server stopped via Ctrl+C')
+        logging.info('Server stopped via Ctrl+C')
         server_socket.close()
         sys.exit()
 

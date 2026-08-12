@@ -4,22 +4,33 @@ import json
 import threading
 import time
 
+import logging
+import os
+import sys
+
+# Track two levels up from client.py to find the project root
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, ROOT)
+
+from shared.util.logger_util import setup_app_logging
+
+setup_app_logging(__file__)
 
 def recv_loop(sock):
     while True:
         try:
             header = sock.recv(4)
             if not header:
-                print("\n[SYSTEM] Server closed connection.")
+                logging.info("\n[SYSTEM] Server closed connection.")
                 break
             length = struct.unpack("!I", header)[0]
             msg = json.loads(sock.recv(length).decode('utf-8'))
 
             # Optionally filter out PONGs to keep your terminal clean during manual testing
             if msg.get("type") != "PONG":
-                print(f"\n[SERVER]: {json.dumps(msg, indent=2)}\n> ", end="")
+                logging.info(f"\n[SERVER]: {json.dumps(msg, indent=2)}\n> ", end="")
         except Exception as e:
-            print(f"\n[SYSTEM] Connection lost: {e}")
+            logging.info(f"\n[SYSTEM] Connection lost: {e}")
             break
 
 def ping_loop(sock):
@@ -54,7 +65,7 @@ while True:
             payload = json.dumps(msg_dict).encode('utf-8')
             s.sendall(struct.pack("!I", len(payload)) + payload)
     except json.JSONDecodeError:
-        print("Invalid JSON format. Please try again.")
+        logging.info("Invalid JSON format. Please try again.")
     except Exception as e:
-        print(f"Error sending data: {e}")
+        logging.info(f"Error sending data: {e}")
         break

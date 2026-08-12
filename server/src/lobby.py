@@ -5,6 +5,7 @@ from game_state import PlayerState, GameState
 from shared.util.logger_util import log_pdu_exchange
 
 import json
+import logging
 
 def send_error_response(conn, seq_num: int, code: str, message: str, rejected_action=None):
     err_pdu = Error(
@@ -129,7 +130,7 @@ def handle_player_ready(conn, payload: dict, game_state: GameState) -> bool:
                 game_state.player_sockets.pop(existing_player_id)
             game_state.player_sockets[pdu.player_id] = conn
 
-            print(f"[LOBBY] Player updated to '{pdu.player_id}' with deck size {len(pdu.deck_list)}")
+            logging.info(f"[LOBBY] Player updated to '{pdu.player_id}' with deck size {len(pdu.deck_list)}")
             broadcast_game_state(game_state)
             return False
         else:
@@ -154,13 +155,13 @@ def handle_player_ready(conn, payload: dict, game_state: GameState) -> bool:
     game_state.socket_to_player[conn] = pdu.player_id
     game_state.player_sockets[pdu.player_id] = conn
 
-    print(f"[LOBBY] Registered player '{pdu.player_id}' with deck size {len(pdu.deck_list)}")
+    logging.info(f"[LOBBY] Registered player '{pdu.player_id}' with deck size {len(pdu.deck_list)}")
 
     # Check if both players are ready to initialize match
     if len(game_state.players) == 2:
         game_state.initialize_game()
 
-        print(f"[GAME] Both players ready. Active player chosen: '{game_state.active_player}'. Status -> MULLIGAN")
+        logging.info(f"[GAME] Both players ready. Active player chosen: '{game_state.active_player}'. Status -> MULLIGAN")
         broadcast_game_state(game_state)
         return True
     else:
@@ -232,7 +233,7 @@ def handle_mulligan_choice(conn, payload: dict, game_state):
                 player.library.append(c_id)
         player.has_kept_hand = True
 
-        print(f"[MULLIGAN] Player '{player_id}' kept their hand.")
+        logging.info(f"[MULLIGAN] Player '{player_id}' kept their hand.")
     else:
         if pdu.cards_to_bottom:
             return send_error_response(
@@ -247,7 +248,7 @@ def handle_mulligan_choice(conn, payload: dict, game_state):
         player.mulligan_count += 1
         player.reset_hand_to_library()
         player.draw_cards(7)
-        print(f"[MULLIGAN] Player '{player_id}' mulliganed (Count: {player.mulligan_count}). Redrew 7 cards.")
+        logging.info(f"[MULLIGAN] Player '{player_id}' mulliganed (Count: {player.mulligan_count}). Redrew 7 cards.")
 
         # Send the new hand ONLY to the redrawing player
         seq_num_new = game_state.get_next_seq_num()
@@ -268,6 +269,6 @@ def handle_mulligan_choice(conn, payload: dict, game_state):
     if game_state.is_all_mulligans_resolved():
         game_state.start_main_game()
         game_state.phase = "IN_GAME"
-        print("[GAME] All mulligans resolved. Match status -> IN_GAME")
+        logging.info("[GAME] All mulligans resolved. Match status -> IN_GAME")
         return None
     return None
