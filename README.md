@@ -27,9 +27,10 @@ CSNETWK-MTGNP/
 │
 ├── client/
 │   └── src/                          # 1. Thin Client Application
-│       ├── client.py                 # Client entry point & TCP socket UI interface
-│       ├── client-test.py            # Automated client connection test script
-│       └── rubric-test.py            # Rubric compliance validation suite
+│       ├── client-combat.py          # Outdated version of client.py
+│       ├── client-test.py            # Testing area of client.py
+│       ├── client.py                 # Final client entry point (player)
+│       └── rubric-test.py            # Rubric compliance validation testing
 │
 ├── server/
 │   └── src/                          # 2. Server & Game Engine
