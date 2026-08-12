@@ -64,24 +64,14 @@ def flush_socket(sock):
     sock.setblocking(True)
 
 # --- DECK GENERATORS ---
-def generate_red_deck():
+def generate_test_deck():
     return (
-            [f"mountain_{i:02d}" for i in range(1, 21)] +
-            [f"goblin_guide_{i:02d}" for i in range(1, 5)] +
-            [f"monastery_swiftspear_{i:02d}" for i in range(1, 5)] +
-            [f"lightning_bolt_{i:02d}" for i in range(1, 5)] +
-            [f"shock_{i:02d}" for i in range(1, 5)] +
-            [f"lava_spike_{i:02d}" for i in range(1, 5)]
-    )
-
-def generate_blue_deck():
-    return (
-            [f"island_{i:02d}" for i in range(1, 21)] +
-            [f"counterspell_{i:02d}" for i in range(1, 5)] +
-            [f"phantasmal_bear_{i:02d}" for i in range(1, 5)] +
-            [f"unsummon_{i:02d}" for i in range(1, 5)] +
-            [f"ponder_{i:02d}" for i in range(1, 5)] +
-            [f"merfolk_looter_{i:02d}" for i in range(1, 5)]
+            [f"mountain_{i:03d}" for i in range(1, 21)] +
+            [f"goblin_guide_{i:03d}" for i in range(1, 5)] +
+            [f"monastery_swiftspear_{i:03d}" for i in range(1, 5)] +
+            [f"phantasmal_bear_{i:03d}" for i in range(1, 5)] +
+            [f"lightning_bolt_{i:03d}" for i in range(1, 5)] +
+            [f"shock_{i:03d}" for i in range(1, 5)]
     )
 
 def test_connection_limits():
@@ -124,10 +114,10 @@ def test_lobby_and_errors():
         logger.error(f"❌ FAIL: Expected ILLEGAL_DECK, got: {resp}")
 
     logger.info("[Test 2] Submitting valid Red Aggro deck...")
-    send_pdu(c1, {"type": "PLAYER_READY", "seq_num": 2, "player_id": "Kurt", "deck_list": generate_red_deck()})
+    send_pdu(c1, {"type": "PLAYER_READY", "seq_num": 2, "player_id": "Kurt", "deck_list": generate_test_deck()})
 
     logger.info("[Test 3] Client 2 attempting to steal 'Kurt' ID...")
-    send_pdu(c2, {"type": "PLAYER_READY", "seq_num": 1, "player_id": "Kurt", "deck_list": generate_blue_deck()})
+    send_pdu(c2, {"type": "PLAYER_READY", "seq_num": 1, "player_id": "Kurt", "deck_list": generate_test_deck()})
     resp = recv_pdu(c2)
     if resp and resp.get("code") == "DUPLICATE_ID":
         logger.info("✅ PASS: Blocked duplicate username (DUPLICATE_ID).")
@@ -135,7 +125,7 @@ def test_lobby_and_errors():
         logger.error(f"❌ FAIL: Expected DUPLICATE_ID, got: {resp}")
 
     logger.info("[Test 4] Client 2 registering correctly as 'Jensel'...")
-    send_pdu(c2, {"type": "PLAYER_READY", "seq_num": 2, "player_id": "Jensel", "deck_list": generate_blue_deck()})
+    send_pdu(c2, {"type": "PLAYER_READY", "seq_num": 2, "player_id": "Jensel", "deck_list": generate_test_deck()})
 
     flush_socket(c1)
     flush_socket(c2)
@@ -151,8 +141,8 @@ def test_in_game_timing():
     c1.connect((HOST, PORT))
     c2.connect((HOST, PORT))
 
-    send_pdu(c1, {"type": "PLAYER_READY", "seq_num": 1, "player_id": "P1", "deck_list": generate_red_deck()}, log=False)
-    send_pdu(c2, {"type": "PLAYER_READY", "seq_num": 1, "player_id": "P2", "deck_list": generate_blue_deck()}, log=False)
+    send_pdu(c1, {"type": "PLAYER_READY", "seq_num": 1, "player_id": "P1", "deck_list": generate_test_deck()}, log=False)
+    send_pdu(c2, {"type": "PLAYER_READY", "seq_num": 1, "player_id": "P2", "deck_list": generate_test_deck()}, log=False)
     time.sleep(0.5)
     flush_socket(c1)
 
@@ -208,8 +198,8 @@ def test_hidden_info_and_mulligan():
     c1.connect((HOST, PORT))
     c2.connect((HOST, PORT))
 
-    send_pdu(c1, {"type": "PLAYER_READY", "seq_num": 1, "player_id": "P1", "deck_list": generate_red_deck()}, log=False)
-    send_pdu(c2, {"type": "PLAYER_READY", "seq_num": 1, "player_id": "P2", "deck_list": generate_blue_deck()}, log=False)
+    send_pdu(c1, {"type": "PLAYER_READY", "seq_num": 1, "player_id": "P1", "deck_list": generate_test_deck()}, log=False)
+    send_pdu(c2, {"type": "PLAYER_READY", "seq_num": 1, "player_id": "P2", "deck_list": generate_test_deck()}, log=False)
 
     p1_seq = p2_seq = 0
     start_time = time.time()
@@ -256,8 +246,8 @@ def test_deck_empty():
     c2.connect((HOST, PORT))
 
     logger.info("[Test] Submitting 1-card decks to force mill-out...")
-    send_pdu(c1, {"type": "PLAYER_READY", "seq_num": 1, "player_id": "P1", "deck_list": ["mountain_01"]})
-    send_pdu(c2, {"type": "PLAYER_READY", "seq_num": 1, "player_id": "P2", "deck_list": ["island_01"]})
+    send_pdu(c1, {"type": "PLAYER_READY", "seq_num": 1, "player_id": "P1", "deck_list": ["mountain_001"]})
+    send_pdu(c2, {"type": "PLAYER_READY", "seq_num": 1, "player_id": "P2", "deck_list": ["island_001"]})
 
     p1_seq = p2_seq = 0
     start_time = time.time()
