@@ -46,4 +46,4 @@ def log_pdu_exchange(direction: str, context: str, pdu_dict: dict):
     formatted_json = json.dumps(display_dict, indent=2)
 
     # prefixes (time, level) that logging.info() would normally attach.
-    print(f"{direction} ({context})\n{formatted_json}\n")
+    logging.debug(f"{direction} ({context})\n{formatted_json}\n")
