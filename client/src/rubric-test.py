@@ -113,7 +113,7 @@ def test_lobby_and_errors():
     else:
         logger.error(f"❌ FAIL: Expected ILLEGAL_DECK, got: {resp}")
 
-    logger.info("[Test 2] Submitting valid Red Aggro deck...")
+    logger.info("[Test 2] Submitting valid Aggro deck...")
     send_pdu(c1, {"type": "PLAYER_READY", "seq_num": 2, "player_id": "Kurt", "deck_list": generate_test_deck()})
 
     logger.info("[Test 3] Client 2 attempting to steal 'Kurt' ID...")

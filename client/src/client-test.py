@@ -3,7 +3,6 @@ import struct
 import json
 import threading
 import time
-
 import logging
 import os
 import sys
@@ -24,66 +23,72 @@ client_state = {
     'opponent_id': None
 }
 
+def send_pdu(sock, pdu_dict):
+    """Helper function to frame and send PDUs."""
+    payload = json.dumps(pdu_dict).encode('utf-8')
+    sock.sendall(struct.pack("!I", len(payload)) + payload)
+
 def parse_command(inp: str) -> dict:
     args = inp.strip().split()
     this_seq_num = client_state['current_seq_num']
     if not args:
         return None
+
     command = args[0].lower()
+
     try:
-        # ready <player_name>
         if command == 'ready':
+            if len(args) < 2:
+                logging.info("Usage: ready <player_name>")
+                return None
             deck = [f"mountain_{i:03d}" for i in range(1, 11)] + \
-                [f"goblin_guide_{i:03d}" for i in range(1, 5)] + \
-                [f"monastery_swiftspear_{i:03d}" for i in range(1, 5)] + \
-                [f"phantasmal_bear_{i:03d}" for i in range(1, 5)]
-            name = args[1]
+                   [f"goblin_guide_{i:03d}" for i in range(1, 5)] + \
+                   [f"monastery_swiftspear_{i:03d}" for i in range(1, 5)] + \
+                   [f"phantasmal_bear_{i:03d}" for i in range(1, 5)]
             return {
                 'type': 'PLAYER_READY',
                 'seq_num': this_seq_num,
-                'player_id': name,
+                'player_id': args[1],
                 'deck_list': deck
             }
-        # pass
-        if command == 'pass':
+
+        elif command == 'pass':
             return {
                 'type': 'PRIORITY_PASS',
                 'seq_num': this_seq_num
             }
-        # mulligan [keep (default) | take | confirm <card_id1> <card_id2> ...]
+
         elif command == 'mulligan':
             decision = None if len(args) == 1 else args[1].lower()
-            cards_to_bottom = []          
+            cards_to_bottom = []
             if not decision or decision == 'keep':
                 keep = True
             elif decision == 'redraw':
                 keep = False
-                client_state['mulligan_count'] = client_state['mulligan_count'] + 1
+                client_state['mulligan_count'] += 1
             elif decision == 'confirm':
                 keep = True
-                if len(args) == 2:
-                    return None
-                cards_to_bottom = args[2:]
-                if len(cards_to_bottom) > client_state['mulligan_count']:
-                    cards_to_bottom = args[2:2+client_state['mulligan_count']+1]
-                elif len(cards_to_bottom) < client_state['mulligan_count']:
-                    return None
+                if len(args) > 2:
+                    # Accurately slice the exact number of penalty cards required
+                    penalty_count = client_state['mulligan_count']
+                    cards_to_bottom = args[2:2 + penalty_count]
             else:
                 return None
+
             return {
                 'type': 'MULLIGAN_CHOICE',
                 'seq_num': this_seq_num,
                 'keep': keep,
                 'cards_to_bottom': cards_to_bottom,
             }
-        # play <card_id>
+
         elif command == 'play':
             return {
                 'type': 'PLAY_LAND',
                 'seq_num': this_seq_num,
                 'card_id': args[1]
             }
-        # cast <card_id> <target> <mana_color1=amount1> [<mana_color2=amount2> ...]
+
         elif command == 'cast':
             card_id = args[1]
             targets = [args[2]] if args[2] != 'none' else []
@@ -98,13 +103,20 @@ def parse_command(inp: str) -> dict:
                 'targets': targets,
                 'mana_payment': mana_payment
             }
-        # activate <permanent_id> [targets] ~ [mana_payment]
+
+        # Usage: activate <permanent_id> <ability_index> [targets] ~ [tap=true/false] <mana_color=amount>
         elif command == 'activate':
+            if len(args) < 3:
+                logging.info("Usage: activate <id> <index> [target|none] ~ tap=true R=1")
+                return None
+
             permanent = args[1]
+            ability_index = int(args[2])
             targets = []
-            mana_payment = {}
+            cost_payment = {"mana": {}, "tap": False}
             paying = False
-            for arg in args[2:]:
+
+            for arg in args[3:]:
                 if arg == '~':
                     paying = True
                     continue
@@ -112,19 +124,24 @@ def parse_command(inp: str) -> dict:
                     if arg.lower() != 'none':
                         targets.append(arg)
                 else:
-                    color, amt = arg.split('=')
-                    mana_payment[color.upper()] = int(amt)
+                    if arg.lower().startswith('tap='):
+                        cost_payment["tap"] = arg.lower().split('=')[1] == 'true'
+                    else:
+                        color, amt = arg.split('=')
+                        cost_payment["mana"][color.upper()] = int(amt)
+
             return {
                 'type': 'ACTIVATE_ABILITY',
                 'seq_num': this_seq_num,
                 'source_id': permanent,
+                'ability_index': ability_index,
                 'targets': targets,
-                'mana_payment': mana_payment
+                'cost_payment': cost_payment
             }
-        # attack <creature1> [<creature2> ...]
+
         elif command == 'attack':
             attackers = []
-            for creature in args[2:]:
+            for creature in args[1:]:
                 attackers.append({
                     'creature_id': creature,
                     'target': client_state['opponent_id']
@@ -134,7 +151,7 @@ def parse_command(inp: str) -> dict:
                 'seq_num': this_seq_num,
                 'attackers': attackers
             }
-        # block <blocker1> <attacker1> [<blocker2> <attacker2> ...]
+
         elif command == 'block':
             blockers = []
             for i in range(1, len(args), 2):
@@ -148,7 +165,7 @@ def parse_command(inp: str) -> dict:
                 'seq_num': this_seq_num,
                 'blockers': blockers
             }
-        # order <attacker_id> <blocker1> [<blocker2> ...]
+
         elif command == 'order':
             attacker = args[1]
             block_order = args[2:]
@@ -158,7 +175,7 @@ def parse_command(inp: str) -> dict:
                 'attacker_id': attacker,
                 'blocker_order': block_order
             }
-        # concede
+
         elif command == 'concede':
             return {
                 'type': 'CONCEDE',
@@ -167,11 +184,12 @@ def parse_command(inp: str) -> dict:
             }
         else:
             return None
+
     except IndexError:
-        logging.info(f"Error in syntax for command '{command}'")
+        logging.info(f"Error in syntax for command '{command}'. Check your arguments.")
         return None
-    except Exception as exc:
-        logging.info(f'Error occurred when parsing command: {e}')
+    except Exception as e: # FIXED: Changed exc to e
+        logging.info(f"Error occurred when parsing command: {e}")
         return None
 
 def recv_loop(sock):
@@ -183,8 +201,10 @@ def recv_loop(sock):
                 break
             length = struct.unpack("!I", header)[0]
             msg = json.loads(sock.recv(length).decode('utf-8'))
+
             if 'seq_num' in msg and msg.get("type") != "PONG":
                 client_state['current_seq_num'] = msg['seq_num']
+
             if 'type' in msg:
                 if msg['type'] == 'PLAYER_READY':
                     if 'player_id' in msg and not client_state['ready']:
@@ -196,7 +216,6 @@ def recv_loop(sock):
                             if player != client_state['player_id']:
                                 client_state['opponent_id'] = player
 
-            # Optionally filter out PONGs to keep your terminal clean during manual testing
             if msg.get("type") != "PONG":
                 logging.info(f"\n[SERVER]: {json.dumps(msg, indent=2)}\n> ")
         except Exception as e:
@@ -204,44 +223,63 @@ def recv_loop(sock):
             break
 
 def ping_loop(sock):
-    """Automates the PING heartbeat required by MTGNP specifications."""
     seq = 1
     while True:
-        time.sleep(5) # Send every 5 seconds to beat the server's 10-second timeout
+        time.sleep(5)
         ping_pdu = {
             "type": "PING",
             "seq_num": seq,
             "timestamp": int(time.time() * 1000)
         }
         try:
-            payload = json.dumps(ping_pdu).encode('utf-8')
-            sock.sendall(struct.pack("!I", len(payload)) + payload)
+            send_pdu(sock, ping_pdu)
             seq += 1
         except Exception:
-            break # Stop thread if socket closes
+            break
 
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.connect(('127.0.0.1', 4444))
 
-# Start background threads for receiving and pinging
 threading.Thread(target=recv_loop, args=(s,), daemon=True).start()
 threading.Thread(target=ping_loop, args=(s,), daemon=True).start()
+
+logging.info("Connected! Type 'help' for commands.")
 
 while True:
     try:
         user_input = input("> ")
-        if user_input.strip():
-            pdu = parse_command(user_input)
-            if pdu:
-                #msg_dict = json.loads(user_input)
-                # Intercept on duplicate ready
-                if 'type' in pdu and pdu['type'] == 'PLAYER_READY' and client_state['ready']:
-                    logging.info('Player already in ready state.')
-                    continue
-                payload = json.dumps(pdu).encode('utf-8')
-                s.sendall(struct.pack("!I", len(payload)) + payload)
+        if not user_input.strip():
+            continue
+
+        if user_input.strip().lower() == 'help':
+            print("""
+Available Commands:
+  ready <player_name>
+  pass
+  mulligan [keep | redraw | confirm <card_id>...]
+  play <land_id>
+  cast <card_id> <target|none> <color=amount>...
+  activate <card_id> <index> <target|none> ~ tap=true <color=amount>...
+  attack <creature_id1> <creature_id2>...
+  block <blocker_id> <attacker_id>...
+  order <attacker_id> <blocker1> <blocker2>...
+  concede
+            """)
+            continue
+
+        pdu = parse_command(user_input)
+        if pdu:
+            if pdu.get('type') == 'PLAYER_READY' and client_state['ready']:
+                logging.info('Player already in ready state.')
+                continue
+            send_pdu(s, pdu)
+
     except json.JSONDecodeError:
         logging.info("Invalid JSON format. Please try again.")
+    except KeyboardInterrupt:
+        logging.info("\nExiting client...")
+        s.close()
+        break
     except Exception as e:
         logging.info(f"Error sending data: {e}")
         break
