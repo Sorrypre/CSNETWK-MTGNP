@@ -28,7 +28,7 @@ def recv_loop(sock):
 
             # Optionally filter out PONGs to keep your terminal clean during manual testing
             if msg.get("type") != "PONG":
-                logging.info(f"\n[SERVER]: {json.dumps(msg, indent=2)}\n> ", end="")
+                logging.info(f"\n[SERVER]: {json.dumps(msg, indent=2)}\n> ")
         except Exception as e:
             logging.info(f"\n[SYSTEM] Connection lost: {e}")
             break
