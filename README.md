@@ -120,9 +120,11 @@ A detailed report of tasks implemented by each member
 | :--- | :--- | :--- | :--- |
 | Gemini v3.6 Flash | *Understanding MTG Concepts based on RFC* | N/A | *Helped on digesting information from the given specifications for the project.* |
 | Gemini v3.1 Pro Extended | *Implementation and Rechecking Program Logic* | `server/src/game_engine.py`, `server/src/game_state.py` | *Assisted on the mechanisms in order to implement features involved + rechecking of code logic* |
-| Gemini v3.6 Thinking | Parsing Google Sheets to JSON  | `shared/cards_catalog.json` | "Helped in creating a python file that automatically transforms the table given in the google sheets into a JSON format." |
-| Gemini v3.6 Thinking | Validation and Understanding of Battle Phase Logic | `shared/src/server.py`, `shared/src/game_state.py`,  `shared/src/game_engine.py` | "Helped in implementing attacker and blocker logic in the battle phase." |
-| Gemini v3.6 Thinking | Debugging Combat Phase  | `shared/src/server.py`, `shared/src/game_state.py`,  `shared/src/game_engine.py` | "Helped identify some missing requirements in the RFC implementation and also the missing attributes inside the classes in the game_state.py. This also helped me identify why there is a non matching sequence num and grant sequence num." |
+| Gemini v3.6 Thinking | *Parsing Google Sheets to JSON*  | `shared/cards_catalog.json` | *Helped in creating a python file that automatically transforms the table given in the google sheets into a JSON format.* |
+| Gemini v3.6 Thinking | *Validation and Understanding of Battle Phase Logic* | `shared/src/server.py`, `shared/src/game_state.py`,  `shared/src/game_engine.py` | *Helped in implementing attacker and blocker logic in the battle phase.* |
+| Gemini v3.6 Thinking | *Debugging Combat Phase*  | `shared/src/server.py`, `shared/src/game_state.py`,  `shared/src/game_engine.py` | *Helped identify some missing requirements in the RFC implementation and also the missing attributes inside the classes in the game_state.py. This also helped me identify why there is a non matching sequence num and grant sequence num.* |
+| Gemini v3.6 Flash | *Syntax* | server/src/framer.py, server/src/game_state.py | *Helped polish syntax based on initial draft of states and implement features involved.* |
+| Gemini v3.6 Flash | *Implementation and Rechecking Program Logic* | server/src/lobby.py | *Assisted on the python syntax of implementing pseudocode for the features involved + rechecking of code logic.* |
 
 ## Known Limitation or Deviations from the RFC
 ### Engine & Rules Deviations
