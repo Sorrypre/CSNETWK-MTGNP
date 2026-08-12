@@ -64,8 +64,7 @@ def process_engine_result(result, conn):
             PDUType.STACK_RESOLVE,
             PDUType.PHASE_TRANSITION,
             PDUType.COMBAT_DAMAGE_RESULT,
-            PDUType.GAME_OVER,
-            PDUType.GAME_STATE_UPDATE
+            PDUType.GAME_OVER
         ]:
             log_pdu_exchange("S -> ALL", f"broadcast {pdu.type}", pdu.model_dump())
 
