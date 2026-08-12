@@ -64,7 +64,7 @@ A detailed report of tasks implemented by each member
 <!-- If you are going to put your contribution please just copy paste this check symbol  ✓ for consistency -->
 | Task/Feature | Member 1 | Member 2 | Member 3 | Member 4 |
 | --- | ---- | --- | --- | --- |
-| TCP Server: connection handling, framing, dispatch | ✓ | - | - | - | ✓ | 
+| TCP Server: connection handling, framing, dispatch | - | - | - | - | ✓ | 
 | Game lifecycle: LOBBY, GAME_SETUP, MULLIGAN logic | ✓ | - | - | - | ✓ | 
 | Turn & phase engine (all phases/steps, transitions) | ✓ | - | - | - | - | 
 | Priority & Stack logic, spell/ability resolution | ✓ | - | - | - | - | 
