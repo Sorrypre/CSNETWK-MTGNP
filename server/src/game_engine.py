@@ -552,7 +552,7 @@ class GameEngine:
             type=PDUType.STACK_RESOLVE,
             seq_num=game_state.get_next_seq_num(),
             stack_item_id=resolved_item["stack_item_id"],
-            result=Literal[result_status],
+            result=result_status,
             state_changes=state_changes
         )
 
