@@ -22,37 +22,73 @@ This document specifies a simplified subset of the full MTG rules. Specifically,
 ## Project Structure
 ```
 CSNETWK-MTGNP/
-├── shared/                       # 1. Independent JSON Set-Up & Card Catalog
-│   ├── schemas/                  # JSON schemas for PDU validation (e.g., CAST_SPELL)
-│   ├── types/                    # Shared data types/interfaces
-│   └── data/
-│       └── cards.json            # The static out-of-band card catalog
+├── .vscode/
+│   └── settings.json                 # Workspace & editor settings
 │
-├── server/                       # 2. Independent Server Modules      
-│   ├── src/
-│   │   ├── network/              # The TCP Connection (Listens on port 4444, Framer)
-│   │   ├── middleware/           # Sequence & Priority Validator
-│   │   ├── controllers/          # MVC Controllers (Routes PDUs to the Engine)
-│   │   ├── engine/               # Game States & Calculations (Core rules, Stack LIFO)
-│   │   └── server.py              # Server entry point
-│   └── tests/                    # Automated tests for game state logic
+├── client/
+│   └── src/                          # 1. Thin Client Application
+│       ├── client.py                 # Client entry point & TCP socket UI interface
+│       ├── client-test.py            # Automated client connection test script
+│       └── rubric-test.py            # Rubric compliance validation suite
 │
-├── client/                       # 3. Independent Thin Client UI
-│   ├── src/
-│   │   ├── components/           # UI rendering (Battlefield, Hand, Stack)
-│   │   ├── network/              # Client-side TCP wrapper to send/receive PDUs
-│   │   ├── context/              # React state to hold the GAME_STATE_UPDATE
-│   │   └── client.py             # Client entry point
-│   └── public/
+├── server/
+│   └── src/                          # 2. Server & Game Engine
+│       ├── server.py                 # Server entry point (TCP socket listener)
+│       ├── game_engine.py            # Core rules execution, combat, & stack mechanics
+│       ├── game_state.py             # Board state, player data, & CardInstance definitions
+│       ├── lobby.py                  # Room management & player matchmaking
+│       ├── framer.py                 # Message stream framing & PDU length prefixing
+│       └── schemas.py                # JSON payload schema validation
 │
-├── .gitignore
-└── README.md
+├── shared/                           # 3. Shared Resources & Data
+│   ├── cards_catalog.json            # Out-of-band static card catalog database
+│   ├── data/                         # Shared data storage directory
+│   └── util/                         # Common utility modules
+│       └── logger_util.py            # Structured logging helper
+│
+├── .gitignore                        # Git file tracking exclusion rules
+├── pyproject.toml                    # Python project packaging & metadata setup
+└── README.md                         # Project documentation and setup instructions
 ```
 ## Instructions
-### How to Build
-### How to Run
-### Enabling Verbose Mode
-
+### Prerequisites
+* **Python:** `3.10` or higher
+### Installation & Setup
+1. (Optional) If you are downloading this from repository, clone it first:
+```bash
+git clone https://github.com/Sorrypre/CSNETWK-MTGNP.git
+cd CSNETWK-MTGNP
+```
+2. Install the package dependencies:
+```bash
+pip install -e .
+```
+### Running the Game
+A complete game session requires **1 Server** instance and **2 Client** instances running concurrently.
+* Terminal 1 (Server):
+```bash
+python server/src/server.py
+```
+* Terminal 2 (Player 1 Client):
+```bash
+python client/src/client.py
+```
+* Terminal 3 (Player 2 Client):
+```bash
+python client/src/client.py
+```
+### Running Verbose
+To print all PDUs sent and received in both client and server-side, use the command-line flag stated below:
+* For the `server.py `
+```bash
+python server/src/server.py --verbose
+```
+* For the `client.py `
+```bash
+python client/src/client.py --verbose
+```
+* You can also use the short `-v`
+* You can also use `-h` for more information
 ## Members
 **Member 1** - Joramm Dela Torre  
 **Member 2** - Jensel Espada  
@@ -64,17 +100,17 @@ A detailed report of tasks implemented by each member
 <!-- If you are going to put your contribution please just copy paste this check symbol  ✓ for consistency -->
 | Task/Feature | Member 1 | Member 2 | Member 3 | Member 4 |
 | --- | ---- | --- | --- | --- |
-| TCP Server: connection handling, framing, dispatch | - | - | - | ✓ | - | 
-| Game lifecycle: LOBBY, GAME_SETUP, MULLIGAN logic | ✓ | - | - | ✓ | - | 
-| Turn & phase engine (all phases/steps, transitions) | ✓ | - | - | - | - | 
-| Priority & Stack logic, spell/ability resolution | ✓ | - | - | - | - | 
-| Combat system (attackers, blockers, damage) | - | ✓ | - | - | - | 
-| Client implementation & state rendering | ✓ | - | - | - | - | 
-| PDU serialization/deserialization (all 25 PDU types) | ✓ | ✓ | - | - | - | 
-| Error handling, PING/PONG heartbeat, disconnect logic| ✓ | - | - | ✓ | - | 
-| Verbose mode (client + server PDU logging, toggle on/off) | - | ✓ | - | ✓ | - | 
-| Testing & interoperability | ✓ | ✓ | ✓ | ✓ | - |
-| README / documentation / AI disclosure |  - | ✓ | - | - | - | 
+| TCP Server: connection handling, framing, dispatch | - | - | - | ✓ |
+| Game lifecycle: LOBBY, GAME_SETUP, MULLIGAN logic | ✓ | - | ✓ | ✓ |
+| Turn & phase engine (all phases/steps, transitions) | ✓ | ✓ | ✓ | - |
+| Priority & Stack logic, spell/ability resolution | ✓ | - | ✓ | - |
+| Combat system (attackers, blockers, damage) | - | ✓ | - | - |
+| Client implementation & state rendering | ✓ | - | ✓ | - |
+| PDU serialization/deserialization (all 25 PDU types) | ✓ | ✓ | ✓ | - |
+| Error handling, PING/PONG heartbeat, disconnect logic| ✓ | ✓ | ✓ | ✓ |
+| Verbose mode (client + server PDU logging, toggle on/off) | ✓ | ✓ | - | - |
+| Testing & interoperability | ✓ | ✓ | ✓ | ✓ |
+| README / documentation / AI disclosure |  ✓ | ✓ | ✓ | ✓ |
 
 
 ## AI Usage
