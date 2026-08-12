@@ -184,7 +184,7 @@ def receive(conn, addr):
                     case PDUType.PING:
                         try:
                             ping = Ping(**message)
-                            pong = Pong(seq_num=ping.seq_num, timestamp=ping.timestamp)
+                            pong = Pong(type=PDUType.PONG, seq_num=ping.seq_num, timestamp=ping.timestamp)
                             send_framed_message(conn, pong.model_dump_json().encode('utf-8'))
                         except ValidationError as ve:
                             send_error_response(

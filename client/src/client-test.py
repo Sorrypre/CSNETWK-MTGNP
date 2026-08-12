@@ -4,6 +4,7 @@ import json
 import threading
 import time
 
+
 def recv_loop(sock):
     while True:
         try:
@@ -44,9 +45,6 @@ s.connect(('127.0.0.1', 4444))
 # Start background threads for receiving and pinging
 threading.Thread(target=recv_loop, args=(s,), daemon=True).start()
 threading.Thread(target=ping_loop, args=(s,), daemon=True).start()
-
-print("Connected! PING heartbeat is running in the background.")
-print("Paste JSON and press Enter to send.")
 
 while True:
     try:
