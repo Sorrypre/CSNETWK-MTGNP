@@ -175,7 +175,7 @@ def recv_loop(sock):
                 break
             length = struct.unpack("!I", header)[0]
             msg = json.loads(sock.recv(length).decode('utf-8'))
-            if 'seq_num' in msg:
+            if 'seq_num' in msg and msg.get("type") != "PONG":
                 client_state['current_seq_num'] = msg['seq_num']
             if 'type' in msg:
                 if msg['type'] == 'PLAYER_READY':
