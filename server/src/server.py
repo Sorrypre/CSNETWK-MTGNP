@@ -56,8 +56,6 @@ def process_engine_result(result, conn):
         return
 
     for pdu in result:
-        payload_bytes = pdu.model_dump_json().encode('utf-8')
-
         # Broadcast turn/phase transitions, combat results, stack events, and game overs
         if pdu.type in [
             PDUType.STACK_PUSH,
@@ -66,6 +64,7 @@ def process_engine_result(result, conn):
             PDUType.COMBAT_DAMAGE_RESULT,
             PDUType.GAME_OVER
         ]:
+            payload_bytes = pdu.model_dump_json().encode('utf-8')
             log_pdu_exchange("S -> ALL", f"broadcast {pdu.type}", pdu.model_dump())
 
             for client_conn in list(game_state.player_sockets.values()):
