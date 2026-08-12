@@ -175,9 +175,11 @@ def receive(conn, addr):
                     continue # discard illegal actions
 
                 # Cancel any existing priority timer for this player
-                player_id = game_state.socket_to_player.get(conn)
-                if player_id in priority_timer:
-                    priority_timer[player_id].cancel()
+                if msg_type != PDUType.PING:
+                    player_id = game_state.socket_to_player.get(conn)
+                    if player_id in priority_timer:
+                        priority_timer[player_id].cancel()
+                        priority_timer.pop(player_id, None)
 
                 # 3. Route actions
                 match msg_type:
