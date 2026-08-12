@@ -18,7 +18,7 @@ setup_app_logging(__file__)
 
 client_state = {
     'ready': False,
-    'mulligan_decided': False,
+    'mulligan_count': 0,
     'current_seq_num': 0,
     'player_id': None,
     'opponent_id': None
@@ -50,24 +50,32 @@ def parse_command(inp: str) -> dict:
                 'type': 'PRIORITY_PASS',
                 'seq_num': this_seq_num
             }
-        # mulligan [keep (default) | take <card_id1> [<card_id2> ...]]
+        # mulligan [keep (default) | take | confirm <card_id1> <card_id2> ...]
         elif command == 'mulligan':
             decision = None if len(args) == 1 else args[1].lower()
-            cards_to_bottom = []
+            cards_to_bottom = []          
             if not decision or decision == 'keep':
                 keep = True
             elif decision == 'take':
-                keep = True if len(args) == 2 else False
-                if len(args) != 2:
-                    cards_to_bottom = args[2:]
+                keep = False
+                client_state['mulligan_count'] = client_state['mulligan_count'] + 1
+            elif decision == 'confirm':
+                keep = True
+                if len(args) == 2:
+                    return None
+                cards_to_bottom = args[2:]
+                if len(cards_to_bottom) > client_state['mulligan_count']:
+                    cards_to_bottom = args[2:2+client_state['mulligan_count']+1]
+                elif len(cards_to_bottom) < client_state['mulligan_count']:
+                    return None
             else:
                 return None
             return {
                 'type': 'MULLIGAN_CHOICE',
                 'seq_num': this_seq_num,
                 'keep': keep,
-                'cards_to_bottom': cards_to_bottom
-            } if not client_state['mulligan_decided'] else None
+                'cards_to_bottom': cards_to_bottom,
+            }
         # play <card_id>
         elif command == 'play':
             return {
@@ -187,8 +195,6 @@ def recv_loop(sock):
                         for player in msg['state']['life_totals'].keys():
                             if player != client_state['player_id']:
                                 client_state['opponent_id'] = player
-                if msg['type'] == 'MULLIGAN_CHOICE':
-                    client_state['mulligan_decided'] = True
 
             # Optionally filter out PONGs to keep your terminal clean during manual testing
             if msg.get("type") != "PONG":
