@@ -231,7 +231,7 @@ class GameState:
         draws 7 cards, and picks active player.
         """
         for p in self.players.values():
-            p.life = 20 # starting life points
+            p.life = 1 # starting life points
             random.shuffle(p.library)
             p.draw_cards(7) # 7 cards each player
 
