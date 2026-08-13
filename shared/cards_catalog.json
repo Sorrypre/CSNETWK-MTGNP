@@ -954,7 +954,7 @@
     "type": "Creature",
     "subtype": "Zombie",
     "color": "B",
-    "cmc": 5,
+    "cmc": 1,
     "mana_cost": {
       "W": 0,
       "U": 0,
