@@ -22,37 +22,74 @@ This document specifies a simplified subset of the full MTG rules. Specifically,
 ## Project Structure
 ```
 CSNETWK-MTGNP/
-├── shared/                       # 1. Independent JSON Set-Up & Card Catalog
-│   ├── schemas/                  # JSON schemas for PDU validation (e.g., CAST_SPELL)
-│   ├── types/                    # Shared data types/interfaces
-│   └── data/
-│       └── cards.json            # The static out-of-band card catalog
+├── .vscode/
+│   └── settings.json                 # Workspace & editor settings
 │
-├── server/                       # 2. Independent Server Modules      
-│   ├── src/
-│   │   ├── network/              # The TCP Connection (Listens on port 4444, Framer)
-│   │   ├── middleware/           # Sequence & Priority Validator
-│   │   ├── controllers/          # MVC Controllers (Routes PDUs to the Engine)
-│   │   ├── engine/               # Game States & Calculations (Core rules, Stack LIFO)
-│   │   └── server.py              # Server entry point
-│   └── tests/                    # Automated tests for game state logic
+├── client/
+│   └── src/                          # 1. Thin Client Application
+│       ├── client-combat.py          # Outdated version of client.py
+│       ├── client-test.py            # Testing area of client.py
+│       ├── client.py                 # Final client entry point (player)
+│       └── rubric-test.py            # Rubric compliance validation testing
 │
-├── client/                       # 3. Independent Thin Client UI
-│   ├── src/
-│   │   ├── components/           # UI rendering (Battlefield, Hand, Stack)
-│   │   ├── network/              # Client-side TCP wrapper to send/receive PDUs
-│   │   ├── context/              # React state to hold the GAME_STATE_UPDATE
-│   │   └── client.py             # Client entry point
-│   └── public/
+├── server/
+│   └── src/                          # 2. Server & Game Engine
+│       ├── server.py                 # Server entry point (TCP socket listener)
+│       ├── game_engine.py            # Core rules execution, combat, & stack mechanics
+│       ├── game_state.py             # Board state, player data, & CardInstance definitions
+│       ├── lobby.py                  # Room management & player matchmaking
+│       ├── framer.py                 # Message stream framing & PDU length prefixing
+│       └── schemas.py                # JSON payload schema validation
 │
-├── .gitignore
-└── README.md
+├── shared/                           # 3. Shared Resources & Data
+│   ├── cards_catalog.json            # Out-of-band static card catalog database
+│   ├── data/                         # Shared data storage directory
+│   └── util/                         # Common utility modules
+│       └── logger_util.py            # Structured logging helper
+│
+├── .gitignore                        # Git file tracking exclusion rules
+├── pyproject.toml                    # Python project packaging & metadata setup
+└── README.md                         # Project documentation and setup instructions
 ```
 ## Instructions
-### How to Build
-### How to Run
-### Enabling Verbose Mode
-
+### Prerequisites
+* **Python:** `3.10` or higher
+### Installation & Setup
+1. (Optional) If you are downloading this from repository, clone it first:
+```bash
+git clone https://github.com/Sorrypre/CSNETWK-MTGNP.git
+cd CSNETWK-MTGNP
+```
+2. Install the package dependencies:
+```bash
+pip install -e .
+```
+### Running the Game
+A complete game session requires **1 Server** instance and **2 Client** instances running concurrently.
+* Terminal 1 (Server):
+```bash
+python server/src/server.py
+```
+* Terminal 2 (Player 1 Client):
+```bash
+python client/src/client.py
+```
+* Terminal 3 (Player 2 Client):
+```bash
+python client/src/client.py
+```
+### Running Verbose
+To print all PDUs sent and received in both client and server-side, use the command-line flag stated below:
+* For the `server.py `
+```bash
+python server/src/server.py --verbose
+```
+* For the `client.py `
+```bash
+python client/src/client.py --verbose
+```
+* You can also use the short `-v`
+* You can also use `-h` for more information
 ## Members
 **Member 1** - Joramm Dela Torre  
 **Member 2** - Jensel Espada  
@@ -64,17 +101,17 @@ A detailed report of tasks implemented by each member
 <!-- If you are going to put your contribution please just copy paste this check symbol  ✓ for consistency -->
 | Task/Feature | Member 1 | Member 2 | Member 3 | Member 4 |
 | --- | ---- | --- | --- | --- |
-| TCP Server: connection handling, framing, dispatch | - | - | - | - | - | 
-| Game lifecycle: LOBBY, GAME_SETUP, MULLIGAN logic | - | - | - | - | - | 
-| Turn & phase engine (all phases/steps, transitions) | - | - | - | - | - | 
-| Priority & Stack logic, spell/ability resolution | - | - | - | - | - | 
-| Combat system (attackers, blockers, damage) | - | - | - | - | - | 
-| Client implementation & state rendering | - | - | - | - | - | 
-| PDU serialization/deserialization (all 25 PDU types) | - | - | - | - | - | 
-| Error handling, PING/PONG heartbeat, disconnect logic| - | - | - | - | - | 
-| Verbose mode (client + server PDU logging, toggle on/off) | - | - | - | - | - | 
-| Testing & interoperability | - | - | - | - | - |
-| README / documentation / AI disclosure |  - | - | - | - | - | 
+| TCP Server: connection handling, framing, dispatch | - | - | - | ✓ |
+| Game lifecycle: LOBBY, GAME_SETUP, MULLIGAN logic | ✓ | - | ✓ | ✓ |
+| Turn & phase engine (all phases/steps, transitions) | ✓ | ✓ | ✓ | - |
+| Priority & Stack logic, spell/ability resolution | ✓ | - | ✓ | - |
+| Combat system (attackers, blockers, damage) | - | ✓ | - | - |
+| Client implementation & state rendering | ✓ | - | ✓ | - |
+| PDU serialization/deserialization (all 25 PDU types) | ✓ | ✓ | ✓ | - |
+| Error handling, PING/PONG heartbeat, disconnect logic| ✓ | ✓ | ✓ | ✓ |
+| Verbose mode (client + server PDU logging, toggle on/off) | ✓ | ✓ | - | - |
+| Testing & interoperability | ✓ | ✓ | ✓ | ✓ |
+| README / documentation / AI disclosure |  ✓ | ✓ | ✓ | ✓ |
 
 
 ## AI Usage
@@ -83,7 +120,22 @@ A detailed report of tasks implemented by each member
 | Tool Name | Feature / Purpose | Specific Scope / Modules | Description of Assistance |
 | :--- | :--- | :--- | :--- |
 | Gemini v3.6 Flash | *Understanding MTG Concepts based on RFC* | N/A | *Helped on digesting information from the given specifications for the project.* |
-| Gemini v3.6 Flash | *Syntax* | `server/src/framer.py`, `server/src/game_state.py` | *Helped polish syntax based on initial draft of states and implement features involved.* |
-| Gemini v3.6 Flash | *Syntax* | `server/src/lobby.py` | *Assisted on the python syntax of implementing pseudocode for the features involved + rechecking of code logic.* |
 | Gemini v3.1 Pro Extended | *Implementation and Rechecking Program Logic* | `server/src/game_engine.py`, `server/src/game_state.py` | *Assisted on the mechanisms in order to implement features involved + rechecking of code logic* |
+| Gemini v3.6 Thinking | *Parsing Google Sheets to JSON*  | `shared/cards_catalog.json` | *Helped in creating a python file that automatically transforms the table given in the google sheets into a JSON format.* |
+| Gemini v3.6 Thinking | *Validation and Understanding of Battle Phase Logic* | `shared/src/server.py`, `shared/src/game_state.py`,  `shared/src/game_engine.py` | *Helped in implementing attacker and blocker logic in the battle phase.* |
+| Gemini v3.6 Thinking | *Debugging Combat Phase*  | `shared/src/server.py`, `shared/src/game_state.py`,  `shared/src/game_engine.py` | *Helped identify some missing requirements in the RFC implementation and also the missing attributes inside the classes in the game_state.py. This also helped me identify why there is a non matching sequence num and grant sequence num.* |
+| Gemini v3.6 Flash | *Syntax* | server/src/framer.py, server/src/game_state.py | *Helped polish syntax based on initial draft of states and implement features involved.* |
+| Gemini v3.6 Flash | *Implementation and Rechecking Program Logic* | server/src/lobby.py | *Assisted on the python syntax of implementing pseudocode for the features involved + rechecking of code logic.* |
+
 ## Known Limitation or Deviations from the RFC
+### Engine & Rules Deviations
+* Exile Zone Mechanics: Spells such as swords_to_plowshares and path_to_exile apply 999 damage to destroy creatures via State-Based Actions rather than sending cards to a distinct Exile zone or resolving secondary spell logic (e.g., land searching, life conversion).
+* Modal & Payment Prompts: healing_salve resolves directly to life gain without presenting a modal prompt, and mana_leak counters target spells immediately without giving the target player an option to pay {3} generic mana.
+* Static Keyword Parsing: Keywords like trample, defender, hexproof, and vigilance present in cards_catalog.json are not extracted during CardInstance initialization.
+* Unhandled Catalog Cards: Utility cards defined in cards_catalog.json—including dark_ritual, sol_ring, ponder, pacifism, millstone, and merfolk_looter—lack execution handlers in apply_spell_ability_effect.
+* Simplified Priority System: Fast-effects and instant-speed responses operate on a simplified LIFO stack push/pop cycle rather than offering strict priority-passing windows across every step transition.
+### Networking & Protocol (RFC) Limitations
+* Connection Drop & Reconnect: Mid-game disconnections are not recoverable; if a socket closes, the server terminates the game session instead of restoring game_state.
+* Out-of-Order PDU Handling: The framing layer processes incoming JSON payloads sequentially using stream buffer delimiters (framer.py); out-of-order or corrupt PDUs trigger an immediate error response rather than auto-retransmit requests.
+* Concurrency & Timing Constraints: The lobby supports pair-based match initialization but does not support multi-room concurrent game execution or spectator mode.
+
