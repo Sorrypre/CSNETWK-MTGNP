@@ -1206,6 +1206,9 @@ class GameEngine:
             trigger_pdus.extend(self.detect_triggers(game_state, "ATTACKS", {"attacker_id": card_id}))
 
         game_state.passes_in_a_row = 0
+
+        game_state.priority_player = game_state.active_player
+
         state_update_pdu = GameStateUpdate(
             type=PDUType.GAME_STATE_UPDATE,
             seq_num=game_state.get_next_seq_num(),
@@ -1218,7 +1221,7 @@ class GameEngine:
         grant_pdu = PriorityGrant(
             type=PDUType.PRIORITY_GRANT,
             seq_num=grant_seq,
-            player_id=player_id,
+            player_id=game_state.active_player,
             time_limit_ms=60000
         )
 
@@ -1268,6 +1271,8 @@ class GameEngine:
 
         game_state.blockers = blocks
         game_state.passes_in_a_row = 0
+
+        game_state.priority_player = game_state.active_player
 
         state_update_pdu = GameStateUpdate(
             type=PDUType.GAME_STATE_UPDATE,
