@@ -83,7 +83,7 @@ class PlayerState:
         self.battlefield: List[CardInstance] = [] # Tracks dynamic CardInstance objects
         self.exile: List[str] = []
         self.lands_played_this_turn: int = 0
-        self.life: int = 20
+        self.life: int = 1
         self.mulligan_count: int = 0
         self.has_kept_hand: bool = False
         self.empty_deck_draw = False
