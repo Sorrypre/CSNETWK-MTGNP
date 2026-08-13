@@ -251,12 +251,12 @@
     "type": "Creature",
     "subtype": "Goblin Scout",
     "color": "R",
-    "cmc": 1,
+    "cmc": 0,
     "mana_cost": {
       "W": 0,
       "U": 0,
       "B": 0,
-      "R": 1,
+      "R": 0,
       "G": 0,
       "Generic": 0
     },
@@ -574,13 +574,13 @@
     "type": "Instant",
     "subtype": null,
     "color": "G",
-    "cmc": 1,
+    "cmc": 0,
     "mana_cost": {
       "W": 0,
       "U": 0,
       "B": 0,
       "R": 0,
-      "G": 1,
+      "G": 0,
       "Generic": 0
     },
     "power": null,
@@ -897,14 +897,14 @@
     "type": "Instant",
     "subtype": null,
     "color": "B",
-    "cmc": 2,
+    "cmc": 0,
     "mana_cost": {
       "W": 0,
       "U": 0,
-      "B": 1,
+      "B": 0,
       "R": 0,
       "G": 0,
-      "Generic": 1
+      "Generic": 0
     },
     "power": null,
     "toughness": null,

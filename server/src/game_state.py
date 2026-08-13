@@ -83,7 +83,7 @@ class PlayerState:
         self.battlefield: List[CardInstance] = [] # Tracks dynamic CardInstance objects
         self.exile: List[str] = []
         self.lands_played_this_turn: int = 0
-        self.life: int = 1
+        self.life: int = 20
         self.mulligan_count: int = 0
         self.has_kept_hand: bool = False
         self.empty_deck_draw = False
@@ -231,7 +231,7 @@ class GameState:
         draws 7 cards, and picks active player.
         """
         for p in self.players.values():
-            p.life = 1 # starting life points
+            p.life = 20 # starting life points
             random.shuffle(p.library)
             p.draw_cards(7) # 7 cards each player
 

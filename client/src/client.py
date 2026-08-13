@@ -43,9 +43,9 @@ def parse_command(inp: str) -> dict:
                 return None
             deck = [f"mountain_{i:03d}" for i in range(1, 11)] + \
                    [f"goblin_guide_{i:03d}" for i in range(1, 5)] + \
-                   [f"monastery_swiftspear_{i:03d}" for i in range(1, 5)] + \
                    [f"gray_merchant_{i:03d}" for i in range(1, 5)] + \
-                   [f"swamp_{i:03d}" for i in range(1, 11)]
+                   [f"doom_blade_{i:03d}" for i in range(1, 5)] + \
+                   [f"vines_of_vastwood_{i:03d}" for i in range(1, 5)]
             return {
                 'type': 'PLAYER_READY',
                 'seq_num': this_seq_num,
