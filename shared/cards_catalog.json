@@ -958,10 +958,10 @@
     "mana_cost": {
       "W": 0,
       "U": 0,
-      "B": 2,
+      "B": 0,
       "R": 0,
       "G": 0,
-      "Generic": 3
+      "Generic": 0
     },
     "power": 2,
     "toughness": 4,
